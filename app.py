@@ -21,30 +21,32 @@ refresh_count = st_autorefresh(interval=300_000, limit=None, key="kabupick_refre
 st.markdown(
     """
     <style>
-    :root { color-scheme: dark; }
-    .stApp { background: #080d16; color: #e6edf7; }
+    .stApp { background: var(--background-color); color: var(--text-color); }
     html, body, [class*="css"] { font-family: "Yu Gothic UI", "Meiryo", sans-serif; }
-    h1, h2, h3 { letter-spacing: .02em; color: #f4f7fc; }
-    [data-testid="stHeader"] { background: rgba(8,13,22,.96); }
-    [data-testid="stSidebar"] { background: #101a2b; border-right: 1px solid #263b5c; transition: all .28s ease; }
+    h1, h2, h3, p, label, [data-testid="stMarkdownContainer"] { color: var(--text-color); }
+    [data-testid="stHeader"] { background: var(--background-color); }
+    [data-testid="stSidebar"] { background: var(--secondary-background-color); border-right: 1px solid color-mix(in srgb, var(--text-color) 18%, transparent); transition: all .28s ease; }
     [data-testid="stSidebar"] button, [data-testid="stSidebar"] input { min-height: 2.8rem; }
     .block-container { padding-top: 1.3rem; max-width: 1500px; }
     .stButton > button[kind="primary"] { background: linear-gradient(110deg,#2563eb,#06b6d4); border:0; color:white; font-weight:750; min-height:3rem; }
-    .stButton > button { border-radius:.7rem; transition: transform .16s ease, filter .16s ease; }
+    .stButton > button { border-radius:.7rem; color:var(--text-color); transition: transform .16s ease, filter .16s ease; }
     .stButton > button:hover { transform: translateY(-1px); filter:brightness(1.14); }
-    [data-testid="stTextInput"] input { font-size:1.25rem !important; font-weight:750 !important; letter-spacing:.12em; background:#0d1727 !important; border-color:#3b82f6 !important; }
+    input, textarea, [data-baseweb="select"] > div { color:var(--text-color) !important; background:var(--secondary-background-color) !important; }
+    input::placeholder, textarea::placeholder { color:color-mix(in srgb, var(--text-color) 62%, transparent) !important; }
+    [data-testid="stTextInput"] input { font-size:1.25rem !important; font-weight:750 !important; letter-spacing:.12em; border-color:var(--primary-color) !important; }
     [data-testid="stRadio"] label { font-size:1rem; }
     .signal { padding: 1.2rem; border-radius: .7rem; text-align: center; color: white; margin: .8rem 0 1rem; border: 1px solid #40516d; box-shadow:0 8px 28px rgba(0,0,0,.2); }
     .signal.ss { background: linear-gradient(120deg,#be123c,#7f1d1d); }
     .signal.buy { background: linear-gradient(120deg,#ea580c,#9a3412); }
     .signal.wait { background: linear-gradient(120deg,#ca8a04,#713f12); }
+    .signal.wait, .signal.wait * { color:#111827 !important; }
     .signal.sell { background: linear-gradient(120deg,#047857,#064e3b); }
     .signal-score { font-size: 2.1rem; font-weight: 800; }
     .signal-message { font-size: 1.35rem; font-weight: 700; }
-    .terminal-card { background:#101a2b; border:1px solid #263b5c; border-radius:.7rem; padding: .85rem 1rem; }
-    .terminal-title { color:#9fb2cf; font-size:.78rem; letter-spacing:.08em; text-transform:uppercase; }
-    .ticker-row { display:flex; justify-content:space-between; padding:.55rem 0; border-bottom:1px solid #263b5c; font-size:.9rem; }
-    .up { color:#22d3ee; } .down { color:#fb7185; }
+    .terminal-card { background:var(--secondary-background-color); color:var(--text-color); border:1px solid color-mix(in srgb, var(--text-color) 18%, transparent); border-radius:.7rem; padding: .85rem 1rem; }
+    .terminal-title { color:color-mix(in srgb, var(--text-color) 72%, transparent); font-size:.78rem; letter-spacing:.08em; text-transform:uppercase; }
+    .ticker-row { display:flex; justify-content:space-between; padding:.55rem 0; border-bottom:1px solid color-mix(in srgb, var(--text-color) 18%, transparent); font-size:.9rem; }
+    .up { color:color-mix(in srgb, #0891b2 72%, var(--text-color)); } .down { color:color-mix(in srgb, #e11d48 72%, var(--text-color)); }
     .menu-badge { display:inline-block; padding:.12rem .48rem; margin-left:.35rem; border-radius:999px; background:#e11d48; color:white; font-weight:800; font-size:.75rem; }
     @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition:none !important; animation:none !important; } }
     </style>
@@ -58,7 +60,10 @@ def rsi(series: pd.Series, period: int = 14) -> pd.Series:
     gain = delta.clip(lower=0).ewm(alpha=1 / period, adjust=False).mean()
     loss = (-delta.clip(upper=0)).ewm(alpha=1 / period, adjust=False).mean()
     rs = gain / loss.replace(0, np.nan)
-    return 100 - (100 / (1 + rs))
+    result = 100 - (100 / (1 + rs))
+    result = result.mask((loss == 0) & (gain > 0), 100)
+    result = result.mask((gain == 0) & (loss > 0), 0)
+    return result
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -77,6 +82,9 @@ def load_data(code: str) -> pd.DataFrame:
     data["MACD"] = ema12 - ema26
     data["Signal"] = data["MACD"].ewm(span=9, adjust=False).mean()
     data["MACD_Hist"] = data["MACD"] - data["Signal"]
+    data["SMA25_Slope5"] = data["SMA25"] - data["SMA25"].shift(5)
+    data["VolumeMA20"] = data["Volume"].rolling(20).mean() if "Volume" in data else np.nan
+    data["VolumeRatio"] = data["Volume"] / data["VolumeMA20"].replace(0, np.nan) if "Volume" in data else np.nan
     return data.dropna(subset=["SMA25", "SMA75", "RSI14", "MACD", "Signal"])
 
 
@@ -147,10 +155,13 @@ def refresh_signal_notifications(items: list[str]) -> list[dict]:
     for item in items:
         try:
             frame = load_data(item)
-            score, _, _, _ = diagnose(frame)
-            label = signal_label(score)
+            score, message, kind, _ = diagnose(frame)
+            if kind not in ("ss", "buy"):
+                state.setdefault("signals", {})[item] = "様子見"
+                continue
+            label = "強い買い条件" if kind == "ss" else "買い条件"
             previous = state.get("signals", {}).get(item)
-            if label in ("SS級", "買い候補") and label != previous:
+            if label != previous:
                 notices.append({"code": item, "label": label, "score": score, "time": now})
             state.setdefault("signals", {})[item] = label
         except Exception:
@@ -215,23 +226,40 @@ def render_menu_page(page: str, code: str) -> None:
         mode = st.selectbox("スクリーニング条件", ["成長重視", "割安重視", "高配当", "財務安定"])
         raw = st.text_input("調べる銘柄コード（カンマ区切り）", value="3921,4674,4828,4345")
         codes = [x.strip() for x in raw.split(",") if x.strip().isdigit() and len(x.strip()) == 4]
+        if len(codes) != len([x for x in raw.split(",") if x.strip()]):
+            st.caption("4桁の数字以外は除外しました。")
+        if st.button("銘柄情報を再取得", key="screen_refresh"):
+            load_fundamentals.clear()
+            st.rerun()
         rows = []
+        failures = []
         with st.spinner("銘柄情報を更新しています…"):
             for item in codes[:20]:
                 try:
                     info = load_fundamentals(item)
                     rows.append({"コード": item, "会社名": info.get("longName") or "—", "PER": info.get("trailingPE"), "PBR": info.get("priceToBook"), "ROE": info.get("returnOnEquity"), "売上成長率": info.get("revenueGrowth"), "配当利回り": info.get("dividendYield"), "自己資本比率の代替指標(負債比率)": info.get("debtToEquity")})
-                except Exception:
-                    continue
+                    if not any(value is not None for key, value in info.items() if key != "longName"):
+                        failures.append((item, "財務指標が返りませんでした（データ未提供または配信元の制限の可能性）"))
+                except Exception as exc:
+                    failures.append((item, f"{type(exc).__name__}: {str(exc)[:180]}"))
         if rows:
             table = pd.DataFrame(rows)
-            if mode == "成長重視": table = table.sort_values("売上成長率", ascending=False, na_position="last")
-            elif mode == "割安重視": table = table.sort_values("PER", ascending=True, na_position="last")
-            elif mode == "高配当": table = table.sort_values("配当利回り", ascending=False, na_position="last")
-            else: table = table.sort_values("自己資本比率の代替指標(負債比率)", ascending=True, na_position="last")
+            sort_column = {"成長重視": "売上成長率", "割安重視": "PER", "高配当": "配当利回り", "財務安定": "自己資本比率の代替指標(負債比率)"}[mode]
+            for column in ["PER", "PBR", "ROE", "売上成長率", "配当利回り", "自己資本比率の代替指標(負債比率)"]:
+                table[column] = pd.to_numeric(table[column], errors="coerce")
+            if table[sort_column].notna().any():
+                table = table.sort_values(sort_column, ascending=(mode in ("割安重視", "財務安定")), na_position="last")
+            else:
+                st.info(f"{mode}の並べ替え指標「{sort_column}」は取得できませんでした。取得できた銘柄を表示しています。")
             st.dataframe(table, use_container_width=True)
         else:
-            st.info("有効な銘柄データがありません。コードと通信状態を確認してください。")
+            st.error("銘柄情報を取得できませんでした。通信元（Yahoo!ファイナンス）の一時制限、または銘柄コードをご確認ください。")
+        if failures:
+            with st.expander(f"取得できなかった銘柄・理由（{len(failures)}件）"):
+                for failed_code, detail in failures:
+                    st.write(f"{failed_code}: {detail}")
+        if len(codes) > 20:
+            st.warning("一度に取得できるのは先頭20銘柄です。")
         st.warning("指標は取得時点の参考値です。銘柄選びや売買の最終判断には使わないでください。")
     elif page == "ウォッチリスト":
         st.subheader("ウォッチリスト")
@@ -288,53 +316,44 @@ def render_menu_page(page: str, code: str) -> None:
 
 def diagnose(data: pd.DataFrame) -> tuple[int, str, str, list[str]]:
     latest = data.iloc[-1]
-    previous = data.iloc[-2]
-    score = 50
     reasons: list[str] = []
-    above_both = latest.Close > latest.SMA25 and latest.Close > latest.SMA75
-    below_both = latest.Close < latest.SMA25 and latest.Close < latest.SMA75
-    if above_both:
-        score += 20
-        reasons.append("株価が25日線・75日線の両方を上回っています。")
-    elif below_both:
-        score -= 20
-        reasons.append("株価が25日線・75日線の両方を下回っています。")
-    else:
-        reasons.append("株価は25日線・75日線の間にあります。")
+    trend_up = latest.Close > latest.SMA25 > latest.SMA75 and latest.SMA25_Slope5 > 0
+    trend_down = latest.Close < latest.SMA25 < latest.SMA75 and latest.SMA25_Slope5 < 0
+    macd_up = latest.MACD > latest.Signal and latest.MACD_Hist > data.MACD_Hist.iloc[-4]
+    macd_down = latest.MACD < latest.Signal and latest.MACD_Hist < data.MACD_Hist.iloc[-4]
+    rsi_ok = 42 <= latest.RSI14 <= 68
+    volume_confirmed = pd.notna(latest.get("VolumeRatio")) and latest.VolumeRatio >= 1.2
 
-    if latest.RSI14 <= 30:
-        score += 25
-        reasons.append(f"RSIは{latest.RSI14:.1f}で、売られすぎの目安（30以下）です。")
-    elif latest.RSI14 >= 70:
-        score -= 25
-        reasons.append(f"RSIは{latest.RSI14:.1f}で、買われすぎの目安（70以上）です。")
-    else:
-        reasons.append(f"RSIは{latest.RSI14:.1f}で、極端な過熱・売られすぎではありません。")
+    score = 0
+    score += 30 if trend_up else (10 if latest.Close > latest.SMA75 else 0)
+    score += 25 if macd_up else (10 if latest.MACD > latest.Signal else 0)
+    score += 20 if rsi_ok else (8 if 35 <= latest.RSI14 < 42 or 68 < latest.RSI14 <= 75 else 0)
+    score += 15 if volume_confirmed else (8 if pd.isna(latest.get("VolumeRatio")) or latest.VolumeRatio >= 1 else 0)
+    score += 10 if latest.RSI14 > data.RSI14.iloc[-4] else 0
+    score = int(max(0, min(100, score)))
 
-    golden_cross = previous.MACD <= previous.Signal and latest.MACD > latest.Signal
-    if golden_cross:
-        score += 25
-        reasons.append("MACDが直近でゴールデンクロスしました。")
-    elif latest.MACD > latest.Signal:
-        reasons.append("MACDはシグナル線を上回っています。")
-    else:
-        reasons.append("MACDはシグナル線を下回っています。")
-
-    score = max(0, min(100, score))
-    if score >= 80:
-        return score, "SS級の買いシグナル", "ss", reasons
-    if score >= 65:
-        return score, "買い候補", "buy", reasons
-    if score >= 36:
-        return score, "様子見", "wait", reasons
-    return score, "売り候補", "sell", reasons
+    reasons.append(f"トレンド：{('上昇確認（終値 > 25日線 > 75日線、25日線も上向き）' if trend_up else '下降確認' if trend_down else '上昇条件は未成立')}。")
+    reasons.append(f"勢い：MACDとシグナル線の位置・直近3営業日のヒストグラム変化は{('改善' if macd_up else '悪化' if macd_down else 'まちまち')}です。")
+    reasons.append(f"RSI14は{latest.RSI14:.1f}（買い候補の目安は42〜68、極端な過熱・下落中の逆張りを避けます）。")
+    reasons.append(f"出来高：20日平均比 {latest.VolumeRatio:.2f}倍。" if pd.notna(latest.get("VolumeRatio")) else "出来高データがないため、出来高確認は判定に加点していません。")
+    buy_ready = trend_up and macd_up and rsi_ok
+    sell_ready = trend_down and macd_down
+    if buy_ready and score >= 90 and volume_confirmed:
+        return score, "買い条件が強く成立", "ss", reasons
+    if buy_ready and score >= 75:
+        return score, "買い条件が複数成立", "buy", reasons
+    if sell_ready and score <= 35:
+        return score, "売却検討条件が成立", "sell", reasons
+    return score, "条件不一致・様子見", "wait", reasons
 
 
 def signal_points(data: pd.DataFrame) -> pd.DataFrame:
-    """MACDクロスと移動平均の位置から、チャートに表示する売買ポイントを作る。"""
+    """トレンド・モメンタム・RSIが揃った日の初回だけをシグナルとして表示する。"""
     points = data.copy()
-    points["BUY"] = (points.MACD > points.Signal) & (points.MACD.shift(1) <= points.Signal.shift(1)) & (points.Close > points.SMA25)
-    points["SELL"] = (points.MACD < points.Signal) & (points.MACD.shift(1) >= points.Signal.shift(1)) & (points.Close < points.SMA25)
+    buy_setup = (points.Close > points.SMA25) & (points.SMA25 > points.SMA75) & (points.SMA25_Slope5 > 0) & (points.MACD > points.Signal) & (points.MACD_Hist > points.MACD_Hist.shift(3)) & points.RSI14.between(42, 68)
+    sell_setup = (points.Close < points.SMA25) & (points.SMA25 < points.SMA75) & (points.SMA25_Slope5 < 0) & (points.MACD < points.Signal) & (points.MACD_Hist < points.MACD_Hist.shift(3))
+    points["BUY"] = buy_setup & ~buy_setup.shift(1, fill_value=False)
+    points["SELL"] = sell_setup & ~sell_setup.shift(1, fill_value=False)
     return points
 
 
@@ -366,6 +385,17 @@ def backtest_summary(data: pd.DataFrame) -> dict:
     if not returns:
         return {"件数": 0, "勝率": None, "平均": None, "累積": None}
     return {"件数": len(returns), "勝率": float(np.mean(np.array(returns) > 0)), "平均": float(np.mean(returns)), "累積": float(np.prod(1 + np.array(returns)) - 1)}
+
+
+def plot_theme() -> tuple[str, str, str]:
+    """Return Plotly template and canvas/text colors matching the viewer's theme."""
+    try:
+        is_dark = st.context.theme.type == "dark"
+    except Exception:
+        is_dark = True
+    if is_dark:
+        return "plotly_dark", "#0d131a", "#e6edf7"
+    return "plotly_white", "#ffffff", "#172033"
 
 
 st.markdown("<div class='terminal-title'>MARKET TERMINAL / JAPAN EQUITIES</div>", unsafe_allow_html=True)
@@ -444,7 +474,9 @@ if run or "data" not in st.session_state or refresh_count > 0 or st.session_stat
         st.session_state.data = data
         st.session_state.code = code
     except Exception as exc:
-        st.error(str(exc))
+        st.error("株価データを取得できませんでした。銘柄コード、Yahoo!ファイナンス側の応答、または通信状態をご確認ください。")
+        with st.expander("エラーの詳細"):
+            st.code(f"{type(exc).__name__}: {str(exc)[:500]}")
         st.stop()
 
 data = st.session_state.data
@@ -481,7 +513,8 @@ with left:
     sell = signals[signals.SELL]
     chart.add_trace(go.Scatter(x=buy.index, y=buy.Low * .985, mode="markers+text", text=["BUY"] * len(buy), textposition="bottom center", name="BUY", marker=dict(symbol="triangle-up", size=13, color="#22d3ee"), textfont=dict(color="#22d3ee", size=10)))
     chart.add_trace(go.Scatter(x=sell.index, y=sell.High * 1.015, mode="markers+text", text=["SELL"] * len(sell), textposition="top center", name="SELL", marker=dict(symbol="triangle-down", size=13, color="#fb7185"), textfont=dict(color="#fb7185", size=10)))
-    chart.update_layout(height=540, template="plotly_dark", paper_bgcolor="#0d131a", plot_bgcolor="#0d131a", margin=dict(l=10, r=10, t=25, b=10), hovermode="x unified", xaxis_rangeslider_visible=False, yaxis_title="価格（円）", legend=dict(orientation="h", y=1.02))
+    chart_template, chart_bg, chart_text = plot_theme()
+    chart.update_layout(height=540, template=chart_template, paper_bgcolor=chart_bg, plot_bgcolor=chart_bg, font=dict(color=chart_text), margin=dict(l=10, r=10, t=25, b=10), hovermode="x unified", xaxis_rangeslider_visible=False, yaxis_title="価格（円）", legend=dict(orientation="h", y=1.02))
     st.plotly_chart(chart, use_container_width=True)
     st.markdown("</div>", unsafe_allow_html=True)
 with right:
@@ -540,11 +573,12 @@ with tab_forecast:
     st.markdown("#### 30営業日の統計シナリオ")
     forecast = forecast_scenario(data)
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=data.index.tail(90), y=data.Close.tail(90), name="実績", line=dict(color="#38bdf8", width=2)))
+    fig.add_trace(go.Scatter(x=data.index[-90:], y=data.Close.tail(90), name="実績", line=dict(color="#38bdf8", width=2)))
     fig.add_trace(go.Scatter(x=forecast.index, y=forecast["中央値シナリオ"], name="中央値", line=dict(color="#fbbf24", dash="dot", width=2)))
     fig.add_trace(go.Scatter(x=forecast.index, y=forecast["上振れ目安"], name="上振れ目安", line=dict(color="#4ade80", dash="dot")))
     fig.add_trace(go.Scatter(x=forecast.index, y=forecast["下振れ目安"], name="下振れ目安", line=dict(color="#fb7185", dash="dot"), fill="tonexty", fillcolor="rgba(148,163,184,.08)"))
-    fig.update_layout(height=430, template="plotly_dark", paper_bgcolor="#0d131a", plot_bgcolor="#0d131a", margin=dict(l=10, r=10, t=25, b=10), yaxis_title="価格（円）")
+    forecast_template, forecast_bg, forecast_text = plot_theme()
+    fig.update_layout(height=430, template=forecast_template, paper_bgcolor=forecast_bg, plot_bgcolor=forecast_bg, font=dict(color=forecast_text), margin=dict(l=10, r=10, t=25, b=10), yaxis_title="価格（円）")
     st.plotly_chart(fig, use_container_width=True)
     current = price
     target = current * 1.10

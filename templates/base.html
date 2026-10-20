@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  {% if page == 'timing' %}<meta http-equiv="refresh" content="300">{% endif %}
+  <title>{% block title %}KABUPICK X{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <style>
+    @media (prefers-color-scheme: light) {
+      :root { color-scheme: light; --bg:#f2f5fa; --panel:#fff; --panel2:#e7edf5; --text:#162033; --muted:#4d5b70; --line:#cbd4e0; --accent:#087f98; }
+      .site-header { background:var(--panel); }
+      .signal.wait { background:#f4e5a9; color:#332700; }
+      .notice { background:#e3f4f8; color:#153b48; }
+      .error { background:#f9e6ea; color:#571b2a; }
+      .buy-text { color:#087f66; }
+      .sell-text { color:#b4233c; }
+    }
+  </style>
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="/?page=timing">KABUPICK <span>X</span></a>
+    <nav aria-label="メインメニュー">
+      <a href="/?page=timing" {% if page == 'timing' %}aria-current="page"{% endif %}>タイミング検索</a>
+      <a href="/?page=screening" {% if page == 'screening' %}aria-current="page"{% endif %}>スクリーニング</a>
+      <a href="/?page=watchlist" {% if page == 'watchlist' %}aria-current="page"{% endif %}>ウォッチリスト</a>
+      <a href="/?page=memos" {% if page == 'memos' %}aria-current="page"{% endif %}>メモ</a>
+      <a href="/?page=news&amp;code={{ code }}" {% if page == 'news' %}aria-current="page"{% endif %}>ニュース</a>
+      <a href="/?page=sources&amp;code={{ code }}" {% if page == 'sources' %}aria-current="page"{% endif %}>情報サイト</a>
+    </nav>
+  </header>
+  <main class="container">
+    {% if message %}<div class="notice">{{ message }}</div>{% endif %}
+    {% if error %}<div class="error"><strong>読み込みに失敗しました</strong><br>{{ error }}</div>{% endif %}
+    {% block content %}{% endblock %}
+    <footer>株価情報は参考値です。売買判断はご自身で行ってください。株価データの取得元: Yahoo!ファイナンス</footer>
+  </main>
+</body>
+</html>

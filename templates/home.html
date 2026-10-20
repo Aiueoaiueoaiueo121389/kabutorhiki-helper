@@ -1,0 +1,28 @@
+{% extends 'base.html' %}
+{% block title %}タイミング検索 | KABUPICK X{% endblock %}
+{% block content %}
+  <section class="hero">
+    <div><p class="eyebrow">JAPAN EQUITIES / HTTP EDITION</p><h1>株式タイミング検索</h1><p class="subtext">ページ再読み込みで動作します。常時接続やWebSocketは使用しません。</p></div>
+    <form class="search" action="/" method="get">
+      <input type="hidden" name="page" value="timing">
+      <label for="code">銘柄コード</label>
+      <input id="code" name="code" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" value="{{ code }}" placeholder="例: 7203" required>
+      <button type="submit">株価を検索</button>
+    </form>
+  </section>
+  {% if content %}
+  <div class="result-heading"><h2>{{ content.code }}.T</h2><span>終値 {{ content.date }}</span><a class="quiet-link" href="/?page=timing&amp;code={{ content.code }}&amp;refresh=1">最新データを再取得</a></div>
+  <section class="signal {{ content.kind }}" aria-live="polite"><div><span class="score">{{ content.score }}<small>点</small></span><strong>{{ content.label }}</strong></div><p>テクニカル指標による参考判定です。利益を保証するものではありません。</p></section>
+  <section class="metrics">
+    <article><span>現在株価</span><strong>¥{{ '{:,.2f}'.format(content.price) }}</strong></article>
+    <article><span>目標株価の目安 (+15%)</span><strong>¥{{ '{:,.2f}'.format(content.price * 1.15) }}</strong></article>
+    <article><span>損切り水準の目安 (-7%)</span><strong>¥{{ '{:,.2f}'.format(content.price * 0.93) }}</strong></article>
+    <article><span>1株の金額</span><strong>¥{{ '{:,.2f}'.format(content.price) }}</strong></article>
+  </section>
+  <section class="panel"><div class="panel-heading"><div><p class="eyebrow">PRICE / SIGNALS</p><h2>株価チャート</h2></div><div class="legend"><span class="legend-close">終値</span><span class="legend-25">25日線</span><span class="legend-75">75日線</span></div></div><div class="chart">{{ content.chart|safe }}</div><p class="subtext">直近100営業日。矢印はトレンド・MACD・RSIの条件が揃った日の初回のみ表示します。</p></section>
+  <div class="columns">
+    <section class="panel"><p class="eyebrow">SIGNAL CHECK</p><h2>判定材料</h2><ul>{% for reason in content.reasons %}<li>{{ reason }}</li>{% endfor %}</ul><div class="inline-metrics"><span>RSI14 <b>{{ '%.1f'|format(content.rsi) }}</b></span><span>SMA25 <b>¥{{ '{:,.2f}'.format(content.sma25) }}</b></span><span>SMA75 <b>¥{{ '{:,.2f}'.format(content.sma75) }}</b></span></div></section>
+    <section class="panel"><p class="eyebrow">RECENT SIGNALS</p><h2>条件成立履歴</h2>{% if content.signals %}<ul class="signal-list">{% for item in content.signals %}<li><time>{{ item.date }}</time><b class="{{ 'buy-text' if item.kind == 'BUY' else 'sell-text' }}">{{ item.kind }}</b><span>¥{{ '{:,.0f}'.format(item.price) }}</span></li>{% endfor %}</ul>{% else %}<p>直近1年に条件成立履歴はありません。</p>{% endif %}</section>
+  </div>
+  {% endif %}
+{% endblock %}

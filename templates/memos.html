@@ -1,0 +1,7 @@
+{% extends 'base.html' %}
+{% block title %}投資メモ | KABUPICK X{% endblock %}
+{% block content %}
+<section class="hero compact"><div><p class="eyebrow">NOTES</p><h1>投資メモ</h1><p class="subtext">メモはこのブラウザーのセッション内に保存されます。</p></div></section>
+<form class="memo-form" action="/memos/add" method="post"><label for="title">タイトル</label><input id="title" name="title" maxlength="80" placeholder="決算メモなど"><label for="body">内容</label><textarea id="body" name="body" maxlength="2000" rows="6" required></textarea><button type="submit">メモを保存</button></form>
+{% for memo in session.memos %}<article class="panel memo"><h2>{{ memo.title }}</h2><p>{{ memo.body }}</p></article>{% else %}<p class="subtext">保存されたメモはありません。</p>{% endfor %}
+{% endblock %}

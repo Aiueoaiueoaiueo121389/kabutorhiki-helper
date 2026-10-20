@@ -1,0 +1,6 @@
+{% extends 'base.html' %}
+{% block title %}情報サイト | KABUPICK X{% endblock %}
+{% block content %}
+<section class="hero compact"><div><p class="eyebrow">SOURCE LINKS</p><h1>{{ code }}.T の情報サイト</h1></div></section>
+<section class="link-grid">{% for name, url in content.sites %}<a class="panel source-link" href="{{ url }}" target="_blank" rel="noopener noreferrer">{{ name }} <span aria-hidden="true">↗</span></a>{% endfor %}</section>
+{% endblock %}

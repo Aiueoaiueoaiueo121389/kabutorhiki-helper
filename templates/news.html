@@ -1,0 +1,7 @@
+{% extends 'base.html' %}
+{% block title %}株価ニュース | KABUPICK X{% endblock %}
+{% block content %}
+<section class="hero compact"><div><p class="eyebrow">MARKET NEWS</p><h1>{{ code }}.T の株価ニュース</h1><p class="subtext">見出しのみ表示します。記事本文は配信元で確認してください。</p></div></section>
+<form class="search compact-search" action="/" method="get"><input type="hidden" name="page" value="news"><label for="news-code">銘柄コード</label><input id="news-code" name="code" value="{{ code }}" inputmode="numeric" maxlength="4"><button type="submit">更新</button></form>
+{% if content and content["items"] %}<section class="panel"><ul class="news-list">{% for item in content["items"] %}<li><a href="{{ item.link }}" rel="noopener noreferrer">{{ item.title }}</a><small>{{ item.date }}</small></li>{% endfor %}</ul></section>{% else %}<p>該当するニュースがありません。</p>{% endif %}
+{% endblock %}
