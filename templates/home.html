@@ -2,7 +2,7 @@
 {% block title %}タイミング検索 | KABUPICK X{% endblock %}
 {% block content %}
   <section class="hero">
-    <div><p class="eyebrow">JAPAN EQUITIES / HTTP EDITION</p><h1>株式タイミング検索</h1><p class="subtext">ページ再読み込みで動作します。常時接続やWebSocketは使用しません。</p></div>
+    <div><p class="eyebrow">JAPAN EQUITIES</p><h1>株式タイミング検索</h1><p class="subtext">4桁の銘柄コードから、売買タイミングの参考情報を確認できます。</p></div>
     <form class="search" action="/" method="get">
       <input type="hidden" name="page" value="timing">
       <label for="code">銘柄コード</label>
@@ -11,7 +11,8 @@
     </form>
   </section>
   {% if content %}
-  <div class="result-heading"><h2>{{ content.code }}.T</h2><span>終値 {{ content.date }}</span><a class="quiet-link" href="/?page=timing&amp;code={{ content.code }}&amp;refresh=1">最新データを再取得</a></div>
+  <div class="result-heading"><div><p class="eyebrow">{{ content.code }}.T / 終値 {{ content.date }}</p><h2>{{ content.company_name }}</h2><p class="stock-name">銘柄名: {{ content.stock_name }}</p></div><a class="quiet-link" href="/?page=timing&amp;code={{ content.code }}&amp;refresh=1">最新データを再取得</a></div>
+  <section class="watch-action panel"><div><p class="eyebrow">WATCHLIST</p><h2>この銘柄をウォッチリストに追加</h2><p class="subtext">{{ content.code }} / {{ content.company_name }}</p></div>{% if content.is_watched %}<span class="watch-status">追加済み</span>{% else %}<form action="/watchlist/add" method="post"><input type="hidden" name="code" value="{{ content.code }}"><input type="hidden" name="next" value="/?page=timing&amp;code={{ content.code }}"><button type="submit">ウォッチリストに追加</button></form>{% endif %}</section>
   <section class="signal {{ content.kind }}" aria-live="polite"><div><span class="score">{{ content.score }}<small>点</small></span><strong>{{ content.label }}</strong></div><p>テクニカル指標による参考判定です。利益を保証するものではありません。</p></section>
   <section class="metrics">
     <article><span>現在株価</span><strong>¥{{ '{:,.2f}'.format(content.price) }}</strong></article>

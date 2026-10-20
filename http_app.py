@@ -183,7 +183,7 @@ def load_fundamentals(code: str) -> dict:
         if cached and now - cached[0] < 300:
             return cached[1].copy()
     info = yf.Ticker(f"{code}.T").info
-    fields = ("longName", "trailingPE", "priceToBook", "returnOnEquity", "revenueGrowth", "dividendYield", "debtToEquity")
+    fields = ("longName", "shortName", "trailingPE", "priceToBook", "returnOnEquity", "revenueGrowth", "dividendYield", "debtToEquity")
     result = {field: info.get(field) for field in fields}
     with _cache_lock:
         _fundamentals_cache[code] = (now, result.copy())
@@ -303,9 +303,14 @@ def home(
             try:
                 data = load_data(item)
                 last = data.iloc[-1]
-                rows.append({"code": item, "price": float(last.Close), "date": data.index[-1].strftime("%Y-%m-%d"), "error": ""})
+                try:
+                    profile = load_fundamentals(item)
+                    name = profile.get("longName") or profile.get("shortName") or "—"
+                except Exception:
+                    name = "—"
+                rows.append({"code": item, "name": name, "price": float(last.Close), "date": data.index[-1].strftime("%Y-%m-%d"), "error": ""})
             except Exception as exc:
-                rows.append({"code": item, "price": None, "date": "—", "error": str(exc)[:160]})
+                rows.append({"code": item, "name": "—", "price": None, "date": "—", "error": str(exc)[:160]})
         context["content"] = {"rows": rows}
         return page_response(request, "watchlist.html", context, session_id)
     if page == "memos":
@@ -356,11 +361,18 @@ def home(
             with _cache_lock:
                 _cache.pop(safe_code, None)
         data = load_data(safe_code)
+        try:
+            profile = load_fundamentals(safe_code)
+        except Exception:
+            profile = {}
         score, label, kind, reasons = diagnose(data)
         last = data.iloc[-1]
         context["code"] = safe_code
         context["content"] = {
             "code": safe_code,
+            "company_name": profile.get("longName") or profile.get("shortName") or "会社名を取得できませんでした",
+            "stock_name": profile.get("shortName") or profile.get("longName") or f"{safe_code}.T",
+            "is_watched": safe_code in session["watchlist"],
             "score": score,
             "label": label,
             "kind": kind,
@@ -388,9 +400,19 @@ async def add_watchlist(request: Request):
     session_id, session = session_for(request)
     form = await request.form()
     code = str(form.get("code", "")).strip()
+    next_path = safe_return_path(str(form.get("next", "")))
+    message = ""
     if code.isdigit() and len(code) == 4 and code not in session["watchlist"] and len(session["watchlist"]) < 20:
         session["watchlist"].append(code)
-    response = RedirectResponse("/?page=watchlist", status_code=303)
+        message = "ウォッチリストに追加しました。"
+    elif code in session["watchlist"]:
+        message = "この銘柄はすでにウォッチリストにあります。"
+    elif code.isdigit() and len(code) == 4:
+        message = "ウォッチリストは20銘柄まで追加できます。"
+    else:
+        message = "銘柄コードは4桁の数字で入力してください。"
+    separator = "&" if "?" in next_path else "?"
+    response = RedirectResponse(f"{next_path}{separator}message={quote(message)}", status_code=303)
     response.set_cookie("kabupick_session", session_id, max_age=30 * 24 * 60 * 60, httponly=True, secure=request.headers.get("x-forwarded-proto") == "https", samesite="lax")
     return response
 
