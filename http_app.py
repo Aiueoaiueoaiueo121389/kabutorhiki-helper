@@ -4,6 +4,7 @@ from html import escape
 import secrets
 from threading import Lock
 from time import monotonic
+from urllib.parse import quote
 
 import numpy as np
 import pandas as pd
@@ -210,7 +211,17 @@ def session_for(request: Request) -> tuple[str, dict]:
             _sessions[session_id] = (monotonic(), current[1])
             return session_id, current[1]
         session_id = secrets.token_urlsafe(24)
-        value = {"watchlist": ["3921", "4674", "4828", "4345"], "memos": []}
+        value = {"watchlist": [], "memos": [{
+            "title": "KABUPICK X スクリーニング条件",
+            "body": (
+                "【メイン条件】本業の営業利益が中長期で継続成長し、売上も成長傾向。原則黒字で、実際に販売中の製品・サービスがあること。 "
+                "ROE 15%以上、自己資本比率50%以上、PBR 3倍以下を基本ラインとし、時価総額100〜1,000億円程度を中心に探す。配当利回り3%以上は加点するが必須ではなく、利益成長を優先。\n\n"
+                "【評価の優先順位】過去の営業利益成長→現在の営業利益成長→売上成長→営業利益率→営業CF・FCF→ROE・ROIC→財務健全性→競争優位性（MOAT）→成長余地→企業規模→PER・PBR→配当。 "
+                "営業利益が伸びても営業CF/FCFが継続悪化する企業、慢性赤字、借金依存、一時特需・M&A頼み、成長失速、弱いMOATは慎重に評価する。\n\n"
+                "【最高優良株の補助条件】長期増収増益、高ROE/ROIC、高営業利益率、強い財務、安定した営業CF、FCF黒字、継続増配、強いMOATを総合確認。条件から少し外れる例外候補は、残す理由を明記する。赤字企業やテーマ・配当・PER・PBR・株価の安さだけで高評価にしない。\n\n"
+                "【重要】企業の質と買い場評価は分ける。好業績でも割高なら待つ。テーマは調査の入口に過ぎず、実際の売上・営業利益で確認する。SS+は極めて厳格（長期連続増益、足元・会社予想も成長、ROE20%以上、自己資本比率70%以上、営業利益率20%以上、CF/FCF健全、割高でない、明確なMOAT等）。重大な穴があれば付けない。"
+            ),
+        }]}
         _sessions[session_id] = (monotonic(), value)
         expired = [key for key, (seen, _) in _sessions.items() if monotonic() - seen > 30 * 24 * 60 * 60]
         for key in expired:
@@ -228,6 +239,32 @@ def page_response(request: Request, name: str, context: dict, session_id: str) -
         secure=request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https",
         samesite="lax",
     )
+    if not request.cookies.get("kabupick_startup_seen"):
+        response.set_cookie("kabupick_startup_seen", "1", max_age=365 * 24 * 60 * 60, httponly=True, secure=request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https", samesite="lax")
+    return response
+
+
+def safe_return_path(value: str) -> str:
+    if value.startswith("/") and not value.startswith("//"):
+        return value
+    return "/?page=timing"
+
+
+@app.post("/welcome/ack")
+async def acknowledge_welcome(request: Request):
+    form = await request.form()
+    response = RedirectResponse(safe_return_path(str(form.get("next", "/?page=timing"))), status_code=303)
+    response.set_cookie("kabupick_notice_seen", "1", max_age=365 * 24 * 60 * 60, httponly=True, secure=request.headers.get("x-forwarded-proto") == "https", samesite="lax")
+    return response
+
+
+@app.post("/theme")
+async def set_theme(request: Request):
+    session_id, session = session_for(request)
+    form = await request.form()
+    session["theme"] = "light" if form.get("theme") == "light" else "dark"
+    response = RedirectResponse(safe_return_path(str(form.get("next", "/?page=timing"))), status_code=303)
+    response.set_cookie("kabupick_session", session_id, max_age=30 * 24 * 60 * 60, httponly=True, secure=request.headers.get("x-forwarded-proto") == "https", samesite="lax")
     return response
 
 
@@ -235,16 +272,29 @@ def page_response(request: Request, name: str, context: dict, session_id: str) -
 def home(
     request: Request,
     page: str = Query("timing"),
-    code: str = Query("4783"),
-    codes: str = Query("3921,4674,4828,4345"),
+    code: str = Query(""),
+    codes: str = Query(""),
     sort: str = Query("growth"),
     message: str = Query(""),
     refresh: int = Query(0),
 ):
     session_id, session = session_for(request)
-    context = {"request": request, "page": page, "code": code, "codes": codes, "error": "", "message": message, "content": None, "session": session}
+    context = {
+        "request": request,
+        "page": page,
+        "code": code,
+        "codes": codes,
+        "error": "",
+        "message": message,
+        "content": None,
+        "session": session,
+        "theme": session.get("theme", "dark"),
+        "show_welcome": not request.cookies.get("kabupick_notice_seen"),
+        "show_startup": not request.cookies.get("kabupick_startup_seen"),
+        "next_path": request.url.path + ("?" + request.url.query if request.url.query else ""),
+    }
     if page == "screening":
-        context["content"] = screening_context(codes, sort)
+        context["content"] = screening_context(codes, sort) if codes.strip() else {"rows": [], "failures": [], "sort": sort, "searched": False}
         context["sort"] = sort
         return page_response(request, "screening.html", context, session_id)
     if page == "watchlist":
@@ -261,10 +311,12 @@ def home(
     if page == "memos":
         return page_response(request, "memos.html", context, session_id)
     if page == "news":
+        if not code.strip():
+            context["content"] = {"items": []}
+            return page_response(request, "news.html", context, session_id)
         try:
             import xml.etree.ElementTree as ET
             import requests
-            from urllib.parse import quote
             url = f"https://news.google.com/rss/search?q={quote(code + ' 株式')}&hl=ja&gl=JP&ceid=JP:ja"
             response = requests.get(url, timeout=10, headers={"User-Agent": "KABUPICK-X/1.0"})
             response.raise_for_status()
@@ -279,13 +331,25 @@ def home(
             context["error"] = f"ニュースを取得できませんでした: {type(exc).__name__}"
         return page_response(request, "news.html", context, session_id)
     if page == "sources":
+        quoted_code = quote(code.strip())
+        news_query = quote((code.strip() + " 株式") if code.strip() else "日本株")
         context["content"] = {"sites": [
-            ("Yahoo!ファイナンス", f"https://finance.yahoo.co.jp/quote/{escape(code)}.T"),
-            ("株探", f"https://kabutan.jp/stock/?code={escape(code)}"),
-            ("TDnet", "https://www.release.tdnet.info/inbs/I_main_00.html"),
-            ("Googleニュース", f"https://news.google.com/search?q={escape(code)}%20%E6%A0%AA%E5%BC%8F&hl=ja&gl=JP&ceid=JP%3Aja"),
+            ("Yahoo!ファイナンス", f"https://finance.yahoo.co.jp/quote/{quoted_code}.T" if quoted_code else "https://finance.yahoo.co.jp/"),
+            ("株探（Kabutan）", f"https://kabutan.jp/stock/?code={quoted_code}" if quoted_code else "https://kabutan.jp/"),
+            ("みんかぶ", f"https://minkabu.jp/stock/{quoted_code}" if quoted_code else "https://minkabu.jp/"),
+            ("IR BANK", f"https://irbank.net/{quoted_code}" if quoted_code else "https://irbank.net/"),
+            ("バフェット・コード", f"https://www.buffett-code.com/company/{quoted_code}/" if quoted_code else "https://www.buffett-code.com/"),
+            ("TradingView", f"https://jp.tradingview.com/symbols/TSE-{quoted_code}/" if quoted_code else "https://jp.tradingview.com/markets/stocks-japan/"),
+            ("日本経済新聞 検索", f"https://www.nikkei.com/search/?query={quote((code + ' 株価') if code else '日本株') }"),
+            ("Googleニュース", f"https://news.google.com/search?q={news_query}&hl=ja&gl=JP&ceid=JP%3Aja"),
+            ("TDnet 適時開示（公式）", "https://www.release.tdnet.info/inbs/I_main_00.html"),
+            ("EDINET 有価証券報告書（公式）", "https://disclosure.edinet-fsa.go.jp/"),
+            ("日本取引所グループ（JPX）", "https://www.jpx.co.jp/"),
+            ("企業IR検索", f"https://www.google.com/search?q={quote((code + ' IR 決算') if code else '日本株 企業 IR 決算') }"),
         ]}
         return page_response(request, "sources.html", context, session_id)
+    if page == "timing" and not code.strip():
+        return page_response(request, "home.html", context, session_id)
     try:
         safe_code = parse_code(code)
         if refresh:
@@ -389,4 +453,4 @@ def screening_context(raw_codes: str, sort: str) -> dict:
     descending = sort_key in ("growth", "dividend")
     available = sorted((row for row in rows if row[sort_key] is not None), key=lambda row: row[sort_key], reverse=descending)
     rows = available + [row for row in rows if row[sort_key] is None]
-    return {"rows": rows, "failures": failures, "sort": sort}
+    return {"rows": rows, "failures": failures, "sort": sort, "searched": True}

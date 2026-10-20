@@ -24,5 +24,11 @@
     <section class="panel"><p class="eyebrow">SIGNAL CHECK</p><h2>判定材料</h2><ul>{% for reason in content.reasons %}<li>{{ reason }}</li>{% endfor %}</ul><div class="inline-metrics"><span>RSI14 <b>{{ '%.1f'|format(content.rsi) }}</b></span><span>SMA25 <b>¥{{ '{:,.2f}'.format(content.sma25) }}</b></span><span>SMA75 <b>¥{{ '{:,.2f}'.format(content.sma75) }}</b></span></div></section>
     <section class="panel"><p class="eyebrow">RECENT SIGNALS</p><h2>条件成立履歴</h2>{% if content.signals %}<ul class="signal-list">{% for item in content.signals %}<li><time>{{ item.date }}</time><b class="{{ 'buy-text' if item.kind == 'BUY' else 'sell-text' }}">{{ item.kind }}</b><span>¥{{ '{:,.0f}'.format(item.price) }}</span></li>{% endfor %}</ul>{% else %}<p>直近1年に条件成立履歴はありません。</p>{% endif %}</section>
   </div>
+  {% else %}
+  <section class="empty-state panel">
+    <p class="eyebrow">READY</p>
+    <h2>銘柄コードを入力してください</h2>
+    <p class="subtext">銘柄を自動選択せず、入力したコードだけを検索します。</p>
+  </section>
   {% endif %}
 {% endblock %}
