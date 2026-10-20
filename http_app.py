@@ -41,10 +41,14 @@ def load_data(code: str) -> pd.DataFrame:
         cached = _cache.get(code)
         if cached and now - cached[0] < 300:
             return cached[1].copy()
-    raw = yf.Ticker(f"{code}.T").history(period="1y", interval="1d", auto_adjust=False)
+    ticker = yf.Ticker(f"{code}.T")
+    raw = ticker.history(period="1y", interval="1d", auto_adjust=False)
     if raw.empty:
         raise ValueError("株価データが見つかりません。銘柄コードをご確認ください。")
     data = raw.rename(columns=str.title).copy()
+    metadata = ticker.history_metadata or {}
+    data.attrs["company_name"] = metadata.get("longName") or metadata.get("shortName") or ""
+    data.attrs["stock_name"] = metadata.get("shortName") or metadata.get("longName") or ""
     close = data["Close"]
     data["SMA25"] = close.rolling(25).mean()
     data["SMA75"] = close.rolling(75).mean()
@@ -303,11 +307,7 @@ def home(
             try:
                 data = load_data(item)
                 last = data.iloc[-1]
-                try:
-                    profile = load_fundamentals(item)
-                    name = profile.get("longName") or profile.get("shortName") or "—"
-                except Exception:
-                    name = "—"
+                name = data.attrs.get("company_name") or data.attrs.get("stock_name") or "—"
                 rows.append({"code": item, "name": name, "price": float(last.Close), "date": data.index[-1].strftime("%Y-%m-%d"), "error": ""})
             except Exception as exc:
                 rows.append({"code": item, "name": "—", "price": None, "date": "—", "error": str(exc)[:160]})
@@ -361,17 +361,22 @@ def home(
             with _cache_lock:
                 _cache.pop(safe_code, None)
         data = load_data(safe_code)
-        try:
-            profile = load_fundamentals(safe_code)
-        except Exception:
-            profile = {}
+        company_name = data.attrs.get("company_name", "")
+        stock_name = data.attrs.get("stock_name", "")
+        if not company_name:
+            try:
+                profile = load_fundamentals(safe_code)
+                company_name = profile.get("longName") or profile.get("shortName") or ""
+                stock_name = stock_name or profile.get("shortName") or profile.get("longName") or ""
+            except Exception:
+                pass
         score, label, kind, reasons = diagnose(data)
         last = data.iloc[-1]
         context["code"] = safe_code
         context["content"] = {
             "code": safe_code,
-            "company_name": profile.get("longName") or profile.get("shortName") or "会社名を取得できませんでした",
-            "stock_name": profile.get("shortName") or profile.get("longName") or f"{safe_code}.T",
+            "company_name": company_name or "会社名を取得できませんでした",
+            "stock_name": stock_name or company_name or f"{safe_code}.T",
             "is_watched": safe_code in session["watchlist"],
             "score": score,
             "label": label,
