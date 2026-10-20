@@ -296,6 +296,7 @@ def home(
         last = data.iloc[-1]
         context["code"] = safe_code
         context["content"] = {
+            "code": safe_code,
             "score": score,
             "label": label,
             "kind": kind,
