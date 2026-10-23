@@ -26,6 +26,7 @@ _cache: dict[str, tuple[float, pd.DataFrame]] = {}
 _cache_lock = Lock()
 _fundamentals_cache: dict[str, tuple[float, dict]] = {}
 _listed_cache: tuple[float, list[dict]] | None = None
+_jquants_access_token: tuple[float, str] | None = None
 _sessions: dict[str, tuple[float, dict]] = {}
 _sessions_lock = Lock()
 
@@ -67,13 +68,24 @@ def resolve_search(value: str) -> str:
     # J-Quantsの上場銘柄マスタが設定されていれば、全銘柄の日本語会社名を検索する。
     token = os.getenv("JQUANTS_API_TOKEN", "").strip()
     if token and key:
-        global _listed_cache
+        global _listed_cache, _jquants_access_token
         now = monotonic()
         try:
+            headers = {"Authorization": f"Bearer {token}"}
+            # J-QuantsのAPIトークンがリフレッシュトークンの場合にも対応する。
+            if _jquants_access_token is None or now - _jquants_access_token[0] > 3300:
+                refresh = requests.post(
+                    "https://api.jquants.com/v1/token/auth_refresh",
+                    params={"refreshtoken": token}, timeout=12,
+                )
+                if refresh.ok and refresh.json().get("idToken"):
+                    _jquants_access_token = (now, refresh.json()["idToken"])
+            if _jquants_access_token:
+                headers = {"Authorization": f"Bearer {_jquants_access_token[1]}"}
             if _listed_cache is None or now - _listed_cache[0] > 900:
                 response = requests.get(
                     "https://api.jquants.com/v1/listed/info",
-                    headers={"Authorization": f"Bearer {token}"},
+                    headers=headers,
                     timeout=12,
                 )
                 response.raise_for_status()
