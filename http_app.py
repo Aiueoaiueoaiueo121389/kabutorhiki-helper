@@ -105,6 +105,19 @@ def resolve_search(value: str) -> str:
         except Exception:
             # 検索不能時も主要銘柄の内蔵辞書で検索を継続する。
             pass
+    # J-Quantsが未認証・一時停止でも、yfinanceの検索結果から日本株コードを解決する。
+    if key:
+        try:
+            results = yf.Search(raw, max_results=10).quotes
+            for row in results or []:
+                symbol = str(row.get("symbol") or "").upper()
+                name = str(row.get("shortname") or row.get("longname") or "")
+                if symbol.endswith(".T") and (key in name.casefold() or key in symbol.casefold()):
+                    candidate = symbol[:-2]
+                    if re.fullmatch(r"(?:[0-9]{4}|[0-9]{3}[A-Z])", candidate):
+                        return candidate
+        except Exception:
+            pass
     return raw
 
 
