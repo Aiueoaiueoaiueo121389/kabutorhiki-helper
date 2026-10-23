@@ -4,8 +4,8 @@ services:
     runtime: python
     plan: free
     region: singapore
-    buildCommand: npm --prefix stock_search ci && npm --prefix stock_search run build
-    startCommand: python stock_search/serve_static.py
+    buildCommand: pip install -r requirements-http.txt
+    startCommand: uvicorn http_app:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /
     autoDeploy: true
     envVars:
