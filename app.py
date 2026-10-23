@@ -94,8 +94,8 @@ def load_data(code: str) -> pd.DataFrame:
     return data.dropna(subset=["SMA25", "SMA75", "RSI14", "MACD", "Signal"])
 
 
-JP_COMPANIES = {"3921": "ネオジャパン", "7203": "トヨタ自動車", "6758": "ソニーグループ", "8306": "三菱UFJフィナンシャル・グループ", "9984": "ソフトバンクグループ", "130A": "VIS"}
-SEARCH_ALIASES = {"トヨタ": "7203", "toyota": "7203", "ソニー": "6758", "ネオジャパン": "3921", "三菱ufj": "8306", "ソフトバンク": "9984", "vis": "130A"}
+JP_COMPANIES = {"3921": "ネオジャパン", "7203": "トヨタ自動車", "6758": "ソニーグループ", "8306": "三菱UFJフィナンシャル・グループ", "9984": "ソフトバンクグループ", "130A": "VIS", "9432": "日本電信電話", "9433": "KDDI", "7267": "ホンダ", "6098": "リクルートホールディングス", "9983": "ファーストリテイリング"}
+SEARCH_ALIASES = {"トヨタ": "7203", "トヨタ自動車": "7203", "toyota": "7203", "ソニー": "6758", "ソニーグループ": "6758", "ネオジャパン": "3921", "三菱ufj": "8306", "三菱ｕｆｊ": "8306", "ソフトバンク": "9984", "ntt": "9432", "日本電信電話": "9432", "kddi": "9433", "ホンダ": "7267", "本田技研": "7267", "リクルート": "6098", "ファーストリテイリング": "9983", "ユニクロ": "9983", "vis": "130A"}
 
 def normalize_code(value: str) -> str:
     value = value.strip().upper()
@@ -485,7 +485,14 @@ def plot_theme() -> tuple[str, str, str]:
 
 
 st.markdown("<div class='terminal-title'>MARKET TERMINAL / JAPAN EQUITIES</div>", unsafe_allow_html=True)
-st.markdown("<div class='terminal-card' style='display:flex;align-items:center;gap:.7rem;margin:.35rem 0 .8rem'><span style='font-size:1.5rem'>☰</span><strong>KABUPICK X メニュー</strong><span style='opacity:.72'>左上のボタンで収納・再表示</span></div>", unsafe_allow_html=True)
+st.markdown("<div class='terminal-card' style='display:flex;align-items:center;gap:.7rem;margin:.35rem 0 .8rem'><span style='font-size:1.5rem'>☰</span><strong>KABUPICK X メニュー</strong><span style='opacity:.72'>上部メニューから機能を選択できます</span></div>", unsafe_allow_html=True)
+menu_items = ["タイミング検索", "株価スクリーニング", "ウォッチリスト", "通知", "メモ", "株価ニュース", "情報サイト"]
+unseen_top = read_json(SIGNAL_STATE_FILE, {"unread": []}).get("unread", [])
+page = st.radio("メニュー", menu_items, horizontal=True, key="main_menu_top", format_func=lambda item: f"{item} 🔴{len(unseen_top)}" if item == "通知" and unseen_top else item)
+top_query = st.text_input("銘柄コード・会社名で検索", value=st.session_state.get("input_query", ""), max_chars=30, placeholder="例：トヨタ / ソニー / 7203 / 130A", key="top_stock_search")
+top_resolved, top_candidates = resolve_search(top_query)
+if top_candidates:
+    st.caption("検索候補: " + "、".join(top_candidates[:5]))
 st.title("株式タイミング・ターミナル")
 st.caption("テクニカル指標を一覧化した参考ツールです。自動売買は行いません。")
 
@@ -496,26 +503,16 @@ with st.sidebar:
     unread_count = len(unseen)
     if unread_count:
         st.markdown(f"<span class='menu-badge'>● {unread_count}件の未確認通知</span>", unsafe_allow_html=True)
-    menu_items = ["タイミング検索", "株価スクリーニング", "ウォッチリスト", "通知", "メモ", "株価ニュース", "情報サイト"]
-    page = st.radio(
-        "メニュー",
-        menu_items,
-        index=0,
-        key="main_menu",
-        format_func=lambda item: f"{item}　🔴{unread_count}" if item == "通知" and unread_count else item,
-    )
     st.divider()
-    st.markdown("### 銘柄検索")
-    query = st.text_input("銘柄コードまたは会社名", value=st.session_state.get("input_query", ""), max_chars=30, placeholder="例：7203 / 130A / トヨタ")
-    resolved_code, candidates = resolve_search(query)
-    if candidates:
-        st.caption("候補: " + "、".join(candidates[:5]))
-    code = resolved_code or query.strip().upper()
-    st.session_state.input_query = query
+    query = top_query
+    code = top_resolved or query.strip().upper()
+    st.session_state.input_query = top_query
     run = st.button("この銘柄を分析", type="primary", use_container_width=True)
     st.divider()
     st.caption("株価データ：Yahoo!ファイナンス　｜　更新：5分ごと")
-    st.caption("サイドバー上部の矢印でメニューを収納・再表示できます。")
+    st.caption("J-Quants API：" + ("接続設定あり" if os.getenv("JQUANTS_API_TOKEN", "").strip() else "未設定（yfinanceへ自動フォールバック）"))
+    st.caption("Discord Webhook：" + ("接続設定あり" if os.getenv("DISCORD_WEBHOOK_URL", "").strip() else "未設定（通知ページから確認）"))
+    st.caption("上部メニューから機能を選択できます。サイドバーは左上のボタンで収納できます。")
 
 if page == "通知":
     st.subheader("シグナル通知")
