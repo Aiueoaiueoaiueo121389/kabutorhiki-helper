@@ -11,15 +11,29 @@ python -m streamlit run app.py
 
 ブラウザーで `http://localhost:8501` を開きます。
 
+### 任意のデータ/API設定
+
+Streamlit版は、設定しなくても株価とテクニカル指標で動作します。J-Quantsを使う場合は、端末の環境変数にAPIトークンを設定します。
+
+```powershell
+$env:JQUANTS_API_TOKEN = "取得したトークン"
+$env:DISCORD_WEBHOOK_URL = "DiscordのWebhook URL"
+python -m streamlit run app.py
+```
+
+J-Quantsの財務値を優先し、取得できない項目はyfinanceの値、または「—」へフォールバックします。APIキーやWebhook URLはソースコードへ書き込まないでください。
+
+Streamlit版では、ROE・PBR・PER・売上成長率などの条件を画面から変更できます。候補コードは10銘柄以上入力すると比較しやすくなります。
+
 ## Renderへの公開
 
 このプロジェクトにはRender用の `render.yaml` を用意しています。GitHubリポジトリにソースを登録してから、Renderで **New → Blueprint** を選び、そのリポジトリを接続してください。Blueprintが無料のWebサービスとして作成されます。公開URLはRenderが割り当てます。HTTP版を公開するときは、Blueprintの起動コマンドが `uvicorn http_app:app` であることを確認してください。
 
 Render無料サービスは15分間アクセスがないと停止し、再アクセス時に起動待ちが発生します。HTTP版のウォッチリストとメモは利用者ごとのサーバー内セッションに保存し、利用者間では共有しません。無料サービス停止や再デプロイでメモリが消えると、これらのデータも失われます。永続保存は行いません。
 
-## LINE通知
+## 通知
 
-HTTP版ではLINE通知と常時バックグラウンド監視はまだ提供していません。秘密情報をGitHubのソースに書かないでください。
+Streamlit版は、監視銘柄の再確認時にDiscord Webhookへ通知できます。LINE通知は既存のローカル用機能として残しています。公開版での常時バックグラウンド監視には、別途Render CronやWorkerなどの常駐実行基盤が必要です。
 
 ## データと利用上の注意
 

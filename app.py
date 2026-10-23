@@ -6,6 +6,8 @@ import os
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from urllib.parse import quote
+import re
+from difflib import get_close_matches
 
 import numpy as np
 import pandas as pd
@@ -69,7 +71,8 @@ def rsi(series: pd.Series, period: int = 14) -> pd.Series:
 @st.cache_data(ttl=300, show_spinner=False)
 def load_data(code: str) -> pd.DataFrame:
     ticker = yf.Ticker(f"{code}.T")
-    data = ticker.history(period="1y", interval="1d", auto_adjust=False)
+    # 3年分を読み込み、75日線のウォームアップ期間を確保する。
+    data = ticker.history(period="3y", interval="1d", auto_adjust=False)
     if data.empty:
         raise ValueError("株価データが見つかりませんでした。コードを確認してください。")
     data = data.rename(columns=str.title)
@@ -88,11 +91,66 @@ def load_data(code: str) -> pd.DataFrame:
     return data.dropna(subset=["SMA25", "SMA75", "RSI14", "MACD", "Signal"])
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+JP_COMPANIES = {"3921": "ネオジャパン", "7203": "トヨタ自動車", "6758": "ソニーグループ", "8306": "三菱UFJフィナンシャル・グループ", "9984": "ソフトバンクグループ", "130A": "VIS"}
+SEARCH_ALIASES = {"トヨタ": "7203", "toyota": "7203", "ソニー": "6758", "ネオジャパン": "3921", "三菱ufj": "8306", "ソフトバンク": "9984", "vis": "130A"}
+
+def normalize_code(value: str) -> str:
+    value = value.strip().upper()
+    if not re.fullmatch(r"(?:[0-9]{4}|[0-9]{3}[A-Z])", value):
+        raise ValueError("銘柄コードは4桁、または130Aのような英字付き形式で入力してください。")
+    return value
+
+def resolve_search(value: str) -> tuple[str, list[str]]:
+    raw = value.strip()
+    try:
+        code = normalize_code(raw)
+        return code, [code]
+    except ValueError:
+        key = raw.lower()
+        code = SEARCH_ALIASES.get(key) or next((v for k, v in SEARCH_ALIASES.items() if key in k.lower()), "")
+        candidates = [f"{name}（{ticker}）" for name, ticker in SEARCH_ALIASES.items() if key and key in name.lower()]
+        if code:
+            return code, candidates or [f"{JP_COMPANIES.get(code, code)}（{code}）"]
+    return "", []
+
+@st.cache_data(ttl=900, show_spinner=False)
+def jquants_fundamentals(code: str) -> dict:
+    token = os.getenv("JQUANTS_API_TOKEN", "").strip()
+    if not token:
+        return {}
+    response = requests.get("https://api.jquants.com/v1/fins/statements", params={"code": code}, headers={"Authorization": f"Bearer {token}"}, timeout=15)
+    response.raise_for_status()
+    rows = response.json().get("statements", [])
+    row = rows[-1] if rows else {}
+    return {"roe": row.get("ROE") or row.get("ROE_average"), "operatingProfit": row.get("OperatingProfit"), "operatingProfitGrowth": row.get("OperatingProfitYoY"), "equityRatio": row.get("EquityToAssetRatio"), "source": "J-Quants"}
+
+@st.cache_data(ttl=900, show_spinner=False)
 def load_fundamentals(code: str) -> dict:
-    info = yf.Ticker(f"{code}.T").info
     fields = ["longName", "currentPrice", "marketCap", "trailingPE", "priceToBook", "returnOnEquity", "profitMargins", "debtToEquity", "dividendYield", "revenueGrowth", "earningsGrowth", "operatingMargins", "freeCashflow"]
-    return {field: info.get(field) for field in fields}
+    result = {field: None for field in fields}
+    result["longName"] = JP_COMPANIES.get(code)
+    try:
+        result.update({"returnOnEquity": jquants_fundamentals(code).get("roe"), "source": "J-Quants"})
+    except Exception:
+        pass
+    try:
+        info = yf.Ticker(f"{code}.T").info
+        result.update({field: info.get(field) for field in fields})
+        result["longName"] = JP_COMPANIES.get(code) or info.get("longName") or info.get("shortName")
+        result["source"] = result.get("source", "yfinance")
+    except Exception:
+        result["source"] = result.get("source", "未取得")
+    return result
+
+def rank_from_score(score: int) -> str:
+    return "SS" if score >= 90 else "S" if score >= 80 else "A" if score >= 65 else "B" if score >= 45 else "C"
+
+def send_discord_alert(message: str) -> tuple[bool, str]:
+    webhook = os.getenv("DISCORD_WEBHOOK_URL", "").strip()
+    if not webhook:
+        return False, "DISCORD_WEBHOOK_URLが未設定です。"
+    response = requests.post(webhook, json={"content": message[:1900]}, timeout=15)
+    return (True, "Discord通知を送信しました。") if response.ok else (False, f"Discord通知に失敗しました（HTTP {response.status_code}）。")
 
 
 DATA_DIR = Path(__file__).resolve().parent / "user_data"
@@ -176,6 +234,10 @@ def refresh_signal_notifications(items: list[str]) -> list[dict]:
             send_line_alert(notification_text)
         except requests.RequestException:
             pass
+        try:
+            send_discord_alert(notification_text)
+        except requests.RequestException:
+            pass
     write_json(SIGNAL_STATE_FILE, state)
     return state.get("unread", [])
 
@@ -222,12 +284,19 @@ def fetch_news(code: str) -> list[dict]:
 def render_menu_page(page: str, code: str) -> None:
     if page == "株価スクリーニング":
         st.subheader("株価スクリーニング")
-        st.caption("登録した銘柄を、4つの観点で比較します。全市場を網羅する機能ではありません。")
+        st.caption("入力した銘柄を、KABUPICK Xの条件で比較します。全市場を網羅する機能ではありません。")
+        with st.expander("現在のスクリーニング条件を確認・変更", expanded=True):
+            roe_min = st.number_input("ROE下限（%）", 0.0, 100.0, 15.0, 1.0, key="screen_roe")
+            pbr_max = st.number_input("PBR上限", 0.1, 50.0, 3.0, 0.1, key="screen_pbr")
+            per_max = st.number_input("PER上限", 1.0, 200.0, 40.0, 1.0, key="screen_per")
+            growth_min = st.number_input("売上成長率下限（%）", -100.0, 200.0, 0.0, 1.0, key="screen_growth")
+            st.caption(f"合格目安：ROE {roe_min:.0f}%以上 / PBR {pbr_max:.1f}倍以下 / PER {per_max:.0f}倍以下 / 売上成長率 {growth_min:.0f}%以上。SSは営業利益の連続成長と割安放置の確認が別途必要です。")
         mode = st.selectbox("スクリーニング条件", ["成長重視", "割安重視", "高配当", "財務安定"])
-        raw = st.text_input("調べる銘柄コード（カンマ区切り）", value="3921,4674,4828,4345")
-        codes = [x.strip() for x in raw.split(",") if x.strip().isdigit() and len(x.strip()) == 4]
-        if len(codes) != len([x for x in raw.split(",") if x.strip()]):
-            st.caption("4桁の数字以外は除外しました。")
+        raw = st.text_input("調べる銘柄コード（10銘柄以上推奨）", value="")
+        codes = []
+        for token in raw.split(",")[:50]:
+            try: codes.append(normalize_code(token))
+            except ValueError: pass
         if st.button("銘柄情報を再取得", key="screen_refresh"):
             load_fundamentals.clear()
             st.rerun()
@@ -237,11 +306,10 @@ def render_menu_page(page: str, code: str) -> None:
             for item in codes[:20]:
                 try:
                     info = load_fundamentals(item)
-                    rows.append({"コード": item, "会社名": info.get("longName") or "—", "PER": info.get("trailingPE"), "PBR": info.get("priceToBook"), "ROE": info.get("returnOnEquity"), "売上成長率": info.get("revenueGrowth"), "配当利回り": info.get("dividendYield"), "自己資本比率の代替指標(負債比率)": info.get("debtToEquity")})
-                    if not any(value is not None for key, value in info.items() if key != "longName"):
-                        failures.append((item, "財務指標が返りませんでした（データ未提供または配信元の制限の可能性）"))
-                except Exception as exc:
-                    failures.append((item, f"{type(exc).__name__}: {str(exc)[:180]}"))
+                    row = {"コード": item, "会社名": info.get("longName") or f"{item}.T", "PER": info.get("trailingPE"), "PBR": info.get("priceToBook"), "ROE": info.get("returnOnEquity"), "売上成長率": info.get("revenueGrowth"), "配当利回り": info.get("dividendYield"), "自己資本比率の代替指標(負債比率)": info.get("debtToEquity"), "データ元": info.get("source", "未取得")}
+                    rows.append(row)
+                except Exception:
+                    rows.append({"コード": item, "会社名": JP_COMPANIES.get(item, f"{item}.T"), "PER": None, "PBR": None, "ROE": None, "売上成長率": None, "配当利回り": None, "自己資本比率の代替指標(負債比率)": None, "データ元": "未取得"})
         if rows:
             table = pd.DataFrame(rows)
             sort_column = {"成長重視": "売上成長率", "割安重視": "PER", "高配当": "配当利回り", "財務安定": "自己資本比率の代替指標(負債比率)"}[mode]
@@ -252,31 +320,35 @@ def render_menu_page(page: str, code: str) -> None:
             else:
                 st.info(f"{mode}の並べ替え指標「{sort_column}」は取得できませんでした。取得できた銘柄を表示しています。")
             st.dataframe(table, use_container_width=True)
+            passed = table[(pd.to_numeric(table["ROE"], errors="coerce") >= roe_min / 100) & (pd.to_numeric(table["PBR"], errors="coerce") <= pbr_max) & (pd.to_numeric(table["PER"], errors="coerce") <= per_max)]
+            st.metric("条件を満たす候補数", f"{len(passed)}件")
         else:
-            st.error("銘柄情報を取得できませんでした。通信元（Yahoo!ファイナンス）の一時制限、または銘柄コードをご確認ください。")
-        if failures:
-            with st.expander(f"取得できなかった銘柄・理由（{len(failures)}件）"):
-                for failed_code, detail in failures:
-                    st.write(f"{failed_code}: {detail}")
+            st.info("銘柄コードを入力してください。候補を10件以上入力すると比較しやすくなります。")
         if len(codes) > 20:
             st.warning("一度に取得できるのは先頭20銘柄です。")
         st.warning("指標は取得時点の参考値です。銘柄選びや売買の最終判断には使わないでください。")
     elif page == "ウォッチリスト":
         st.subheader("ウォッチリスト")
-        items = read_json(WATCHLIST_FILE, ["3921", "4674", "4828", "4345"])
-        add = st.text_input("銘柄コードを追加", max_chars=4)
+        items = read_json(WATCHLIST_FILE, [])
+        add = st.text_input("銘柄コードを追加（例：7203 / 130A）", max_chars=4)
         c1, c2 = st.columns(2)
-        if c1.button("追加", use_container_width=True) and add.isdigit() and len(add) == 4 and add not in items:
-            items.append(add); write_json(WATCHLIST_FILE, items); st.rerun()
+        if c1.button("追加", use_container_width=True):
+            try:
+                code_to_add = normalize_code(add)
+                if code_to_add not in items:
+                    items.append(code_to_add); write_json(WATCHLIST_FILE, items); st.rerun()
+            except ValueError:
+                st.warning("4桁コードまたは130A形式で入力してください。")
         if c2.button("現在の一覧を保存", use_container_width=True):
             write_json(WATCHLIST_FILE, items); st.success("保存しました。")
         rows = []
         for item in items:
             try:
                 d = load_data(item); last = d.iloc[-1]; prev = d.iloc[-2]
-                rows.append({"コード": item, "終値": float(last.Close), "前日比": float(last.Close - prev.Close), "更新日": d.index[-1].strftime("%Y-%m-%d")})
+                fi = load_fundamentals(item)
+                rows.append({"コード": item, "会社名": fi.get("longName") or JP_COMPANIES.get(item, "—"), "終値": float(last.Close), "前日比": float(last.Close - prev.Close), "ROE": fi.get("returnOnEquity"), "PBR": fi.get("priceToBook"), "配当利回り": fi.get("dividendYield"), "更新日": d.index[-1].strftime("%Y-%m-%d")})
             except Exception:
-                rows.append({"コード": item, "終値": None, "前日比": None, "更新日": "取得失敗"})
+                rows.append({"コード": item, "会社名": JP_COMPANIES.get(item, "—"), "終値": None, "前日比": None, "ROE": None, "PBR": None, "配当利回り": None, "更新日": "取得失敗"})
         st.dataframe(pd.DataFrame(rows), use_container_width=True)
         for item in items:
             st.link_button(f"{item}.T を開く", f"https://finance.yahoo.co.jp/quote/{item}.T")
@@ -314,7 +386,7 @@ def render_menu_page(page: str, code: str) -> None:
             st.link_button(name, url, use_container_width=True)
 
 
-def diagnose(data: pd.DataFrame) -> tuple[int, str, str, list[str]]:
+def diagnose(data: pd.DataFrame, fundamentals: dict | None = None) -> tuple[int, str, str, list[str]]:
     latest = data.iloc[-1]
     reasons: list[str] = []
     trend_up = latest.Close > latest.SMA25 > latest.SMA75 and latest.SMA25_Slope5 > 0
@@ -330,6 +402,15 @@ def diagnose(data: pd.DataFrame) -> tuple[int, str, str, list[str]]:
     score += 20 if rsi_ok else (8 if 35 <= latest.RSI14 < 42 or 68 < latest.RSI14 <= 75 else 0)
     score += 15 if volume_confirmed else (8 if pd.isna(latest.get("VolumeRatio")) or latest.VolumeRatio >= 1 else 0)
     score += 10 if latest.RSI14 > data.RSI14.iloc[-4] else 0
+    if fundamentals:
+        roe = fundamentals.get("returnOnEquity")
+        margin = fundamentals.get("operatingMargins")
+        if isinstance(roe, (int, float)) and np.isfinite(roe):
+            score += 10 if roe >= 0.15 else 4 if roe > 0 else 0
+            reasons.append(f"ROE: {roe:.1%}（目安15%以上）")
+        if isinstance(margin, (int, float)) and np.isfinite(margin) and margin > 0.10:
+            score += 5
+            reasons.append(f"営業利益率: {margin:.1%}（参考加点）")
     score = int(max(0, min(100, score)))
 
     reasons.append(f"トレンド：{('上昇確認（終値 > 25日線 > 75日線、25日線も上向き）' if trend_up else '下降確認' if trend_down else '上昇条件は未成立')}。")
@@ -339,11 +420,11 @@ def diagnose(data: pd.DataFrame) -> tuple[int, str, str, list[str]]:
     buy_ready = trend_up and macd_up and rsi_ok
     sell_ready = trend_down and macd_down
     if buy_ready and score >= 90 and volume_confirmed:
-        return score, "買い条件が強く成立", "ss", reasons
+        return score, "テクニカル条件が強く成立", "ss", reasons
     if buy_ready and score >= 75:
-        return score, "買い条件が複数成立", "buy", reasons
+        return score, "上昇条件が複数成立", "buy", reasons
     if sell_ready and score <= 35:
-        return score, "売却検討条件が成立", "sell", reasons
+        return score, "下落リスク条件を確認", "sell", reasons
     return score, "条件不一致・様子見", "wait", reasons
 
 
@@ -404,7 +485,7 @@ st.caption("テクニカル指標を一覧化した参考ツールです。自�
 
 with st.sidebar:
     st.markdown("## KABUPICK X")
-    watch_for_badge = read_json(WATCHLIST_FILE, ["3921", "4674", "4828", "4345"])
+    watch_for_badge = read_json(WATCHLIST_FILE, [])
     unseen = read_json(SIGNAL_STATE_FILE, {"unread": []}).get("unread", [])
     unread_count = len(unseen)
     if unread_count:
@@ -419,8 +500,12 @@ with st.sidebar:
     )
     st.divider()
     st.markdown("### 銘柄検索")
-    code = st.text_input("日本株コード", value=st.session_state.get("input_code", "4783"), max_chars=4, placeholder="例：7203", help="4桁コードを入力してください")
-    st.session_state.input_code = code
+    query = st.text_input("銘柄コードまたは会社名", value=st.session_state.get("input_query", ""), max_chars=30, placeholder="例：7203 / 130A / トヨタ")
+    resolved_code, candidates = resolve_search(query)
+    if candidates:
+        st.caption("候補: " + "、".join(candidates[:5]))
+    code = resolved_code or query.strip().upper()
+    st.session_state.input_query = query
     run = st.button("この銘柄を分析", type="primary", use_container_width=True)
     st.divider()
     st.caption("株価データ：Yahoo!ファイナンス　｜　更新：5分ごと")
@@ -428,7 +513,7 @@ with st.sidebar:
 
 if page == "通知":
     st.subheader("シグナル通知")
-    current_items = read_json(WATCHLIST_FILE, ["3921", "4674", "4828", "4345"])
+    current_items = read_json(WATCHLIST_FILE, [])
     if st.button("監視銘柄を再確認", type="primary"):
         refresh_signal_notifications(current_items)
         st.rerun()
@@ -450,6 +535,11 @@ if page == "通知":
     line_ready = bool(not HOSTED_MODE and os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "").strip() and os.getenv("LINE_USER_ID", "").strip())
     st.write("LINE Messaging API：" + ("接続情報あり" if line_ready else "停止中（公開版は認証導入後に利用可能）" if HOSTED_MODE else "未設定（アプリ内バッジは利用できます）"))
     st.caption("公開状態では訪問者から持ち主への通知を防ぐため、LINE送信を停止しています。")
+    discord_ready = bool(os.getenv("DISCORD_WEBHOOK_URL", "").strip())
+    st.write("Discord Webhook：" + ("接続情報あり" if discord_ready else "未設定"))
+    if discord_ready and st.button("Discordへテスト通知を送る"):
+        ok, detail = send_discord_alert("KABUPICK X のDiscord通知テストです。")
+        (st.success if ok else st.error)(detail)
     if line_ready and st.button("LINEへテスト通知を送る"):
         ok, detail = send_line_alert("KABUPICK X のLINE通知テストです。")
         (st.success if ok else st.error)(detail)
@@ -458,15 +548,17 @@ if page == "通知":
 if page != "タイミング検索":
     render_menu_page(page, code)
     if page == "ウォッチリスト":
-        latest_unread = refresh_signal_notifications(read_json(WATCHLIST_FILE, ["3921", "4674", "4828", "4345"]))
+        latest_unread = refresh_signal_notifications(read_json(WATCHLIST_FILE, []))
         if latest_unread:
             st.markdown(f"新着シグナル通知 <span class='menu-badge'>{len(latest_unread)}</span>　サイドバーの「通知」で確認できます。", unsafe_allow_html=True)
     st.caption(f"最終確認：{datetime.now().strftime('%Y-%m-%d %H:%M')}　|　データ取得は5分キャッシュ")
     st.stop()
 
 if run or "data" not in st.session_state or refresh_count > 0 or st.session_state.get("code") != code:
-    if not code.isdigit() or len(code) != 4:
-        st.error("4桁の数字を入力してください。")
+    try:
+        code = normalize_code(code)
+    except ValueError as exc:
+        st.error(str(exc))
         st.stop()
     try:
         with st.spinner("株価データを取得・計算しています…"):
@@ -481,17 +573,19 @@ if run or "data" not in st.session_state or refresh_count > 0 or st.session_stat
 
 data = st.session_state.data
 code = st.session_state.code
-updated_notifications = refresh_signal_notifications(list(dict.fromkeys(read_json(WATCHLIST_FILE, ["3921", "4674", "4828", "4345"]) + [code])))
+updated_notifications = refresh_signal_notifications(list(dict.fromkeys(read_json(WATCHLIST_FILE, []) + [code])))
 if len(updated_notifications) > unread_count:
     st.rerun()
 latest = data.iloc[-1]
-score, message, kind, reasons = diagnose(data)
+fundamentals = load_fundamentals(code)
+score, message, kind, reasons = diagnose(data, fundamentals)
 price = float(latest.Close)
 signals = signal_points(data)
 
-st.subheader(f"{code}.T　{data.index[-1].strftime('%Y-%m-%d')} 終値ベース")
+company_name = fundamentals.get("longName") or JP_COMPANIES.get(code) or f"{code}.T"
+st.subheader(f"{code}.T　{company_name}　{data.index[-1].strftime('%Y-%m-%d')} 終値ベース")
 st.markdown(
-    f'<div class="signal {kind}"><div class="signal-score">{score}点</div><div class="signal-message">{message}</div></div>',
+    f'<div class="signal {kind}"><div class="signal-score">{rank_from_score(score)}　{score}点</div><div class="signal-message">{message}</div><div>診断スコア（意思決定の補助情報）</div></div>',
     unsafe_allow_html=True,
 )
 
@@ -557,15 +651,16 @@ st.divider()
 tab_watch, tab_forecast, tab_verify = st.tabs(["👀 お気に入り一括監視", "🔮 予測・シナリオ", "💡 根拠・バックテスト"])
 with tab_watch:
     st.markdown("#### ウォッチリストの一括確認")
-    watch_items = read_json(WATCHLIST_FILE, ["3921", "4674", "4828", "4345"])
+    watch_items = read_json(WATCHLIST_FILE, [])
     watch_rows = []
     for item in watch_items:
         try:
             wd = load_data(item)
             ws, wm, wk, _ = diagnose(wd)
-            watch_rows.append({"コード": item, "終値": float(wd.Close.iloc[-1]), "判定": wm, "スコア": ws, "更新日": wd.index[-1].strftime("%Y-%m-%d")})
+            wf = load_fundamentals(item)
+            watch_rows.append({"コード": item, "会社名": wf.get("longName") or JP_COMPANIES.get(item, "—"), "終値": float(wd.Close.iloc[-1]), "ROE": wf.get("returnOnEquity"), "PBR": wf.get("priceToBook"), "配当利回り": wf.get("dividendYield"), "判定": wm, "ランク": rank_from_score(ws), "スコア": ws, "更新日": wd.index[-1].strftime("%Y-%m-%d")})
         except Exception:
-            watch_rows.append({"コード": item, "終値": None, "判定": "取得失敗", "スコア": None, "更新日": "—"})
+            watch_rows.append({"コード": item, "会社名": JP_COMPANIES.get(item, "—"), "終値": None, "ROE": None, "PBR": None, "配当利回り": None, "判定": "未取得", "ランク": "—", "スコア": None, "更新日": "—"})
     st.dataframe(pd.DataFrame(watch_rows), use_container_width=True)
     st.caption("ウォッチリストは左メニューの「ウォッチリスト」から編集できます。")
 
