@@ -83,13 +83,18 @@ def resolve_search(value: str) -> str:
             if _jquants_access_token:
                 headers = {"Authorization": f"Bearer {_jquants_access_token[1]}"}
             if _listed_cache is None or now - _listed_cache[0] > 900:
-                response = requests.get(
-                    "https://api.jquants.com/v1/listed/info",
-                    headers=headers,
-                    timeout=12,
-                )
-                response.raise_for_status()
-                _listed_cache = (now, response.json().get("info", []))
+                listed = []
+                pagination_key = None
+                for _ in range(30):
+                    params = {"pagination_key": pagination_key} if pagination_key else {}
+                    response = requests.get("https://api.jquants.com/v1/listed/info", headers=headers, params=params, timeout=12)
+                    response.raise_for_status()
+                    payload = response.json()
+                    listed.extend(payload.get("info", []))
+                    pagination_key = payload.get("pagination_key")
+                    if not pagination_key:
+                        break
+                _listed_cache = (now, listed)
             for row in _listed_cache[1]:
                 name = str(row.get("CompanyName") or row.get("CompanyNameEnglish") or "")
                 code = str(row.get("Code") or "").upper()
