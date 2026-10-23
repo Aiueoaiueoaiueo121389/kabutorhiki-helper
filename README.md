@@ -27,7 +27,7 @@ Streamlit版では、ROE・PBR・PER・売上成長率などの条件を画面�
 
 ## Renderへの公開
 
-このプロジェクトにはRender用の `render.yaml` を用意しています。GitHubリポジトリにソースを登録してから、Renderで **New → Blueprint** を選び、そのリポジトリを接続してください。Blueprintが無料のWebサービスとして作成されます。公開URLはRenderが割り当てます。HTTP版を公開するときは、Blueprintの起動コマンドが `uvicorn http_app:app` であることを確認してください。
+このプロジェクトにはRender用の `render.yaml` を用意しています。GitHubリポジトリにソースを登録してから、Renderで **New → Blueprint** を選び、そのリポジトリを接続してください。Blueprintが無料のWebサービスとして作成されます。現在の公開設定は、J-Quants・Discord通知・条件調整を含むStreamlit版 `app.py` を起動します。
 
 Render無料サービスは15分間アクセスがないと停止し、再アクセス時に起動待ちが発生します。HTTP版のウォッチリストとメモは利用者ごとのサーバー内セッションに保存し、利用者間では共有しません。無料サービス停止や再デプロイでメモリが消えると、これらのデータも失われます。永続保存は行いません。
 

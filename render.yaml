@@ -4,9 +4,9 @@ services:
     runtime: python
     plan: free
     region: singapore
-    buildCommand: pip install -r requirements-http.txt
-    startCommand: uvicorn http_app:app --host 0.0.0.0 --port $PORT
-    healthCheckPath: /healthz
+    buildCommand: pip install -r requirements.txt
+    startCommand: streamlit run app.py --server.address 0.0.0.0 --server.port $PORT --server.headless true
+    healthCheckPath: /
     autoDeploy: true
     envVars:
       - key: PYTHON_VERSION
