@@ -15,14 +15,14 @@
 <form class="filter-form" method="get" action="/">
   <input type="hidden" name="page" value="screening">
   <label for="codes">銘柄コード（カンマ区切り）</label>
-  <input id="codes" name="codes" value="{{ codes }}" placeholder="例: 7203,6758,8306" autocomplete="off">
+  <input id="codes" name="codes" value="{{ codes }}" placeholder="例: 7203,6758,130A" autocomplete="off">
   <label for="sort">並べ替え</label>
   <select id="sort" name="sort"><option value="growth" {% if sort == 'growth' %}selected{% endif %}>売上成長</option><option value="value" {% if sort == 'value' %}selected{% endif %}>PER（参考）</option><option value="dividend" {% if sort == 'dividend' %}selected{% endif %}>配当利回り</option><option value="debt" {% if sort == 'debt' %}selected{% endif %}>負債比率（小さい順）</option></select>
   <button type="submit">入力銘柄を検索</button>
 </form>
-{% if content and content.rows %}<div class="table-wrap"><table><thead><tr><th>コード</th><th>会社名</th><th>PER</th><th>PBR</th><th>ROE</th><th>売上成長率</th><th>配当利回り</th><th>負債比率</th></tr></thead><tbody>{% for row in content.rows %}<tr><td><a href="/?page=timing&amp;code={{ row.code }}">{{ row.code }}</a></td><td>{{ row.name }}</td><td>{{ row.per if row.per is not none else '—' }}</td><td>{{ row.pbr if row.pbr is not none else '—' }}</td><td>{{ row.roe if row.roe is not none else '—' }}</td><td>{{ row.growth if row.growth is not none else '—' }}</td><td>{{ row.dividend if row.dividend is not none else '—' }}</td><td>{{ row.debt if row.debt is not none else '—' }}</td></tr>{% endfor %}</tbody></table></div>
+{% if content and content.rows %}<div class="table-wrap"><table><thead><tr><th>コード</th><th>会社名</th><th>PER</th><th>PBR</th><th>ROE</th><th>売上成長率</th><th>配当利回り</th><th>負債比率</th><th>状態</th></tr></thead><tbody>{% for row in content.rows %}<tr><td><a href="/?page=timing&amp;code={{ row.code }}">{{ row.code }}</a></td><td>{{ row.name }}</td><td>{{ '%.1f'|format(row.per) if row.per is not none else '—' }}</td><td>{{ '%.1f'|format(row.pbr) if row.pbr is not none else '—' }}</td><td>{{ '%.1f%%'|format(row.roe * 100) if row.roe is not none else '—' }}</td><td>{{ '%.1f%%'|format(row.growth * 100) if row.growth is not none else '—' }}</td><td>{{ '%.1f%%'|format(row.dividend) if row.dividend is not none else '—' }}</td><td>{{ '%.1f'|format(row.debt) if row.debt is not none else '—' }}</td><td>{{ row.data_status }}</td></tr>{% endfor %}</tbody></table></div>
 {% elif content and content.searched %}<div class="notice">取得できるデータがありません。コードを確認するか、各銘柄の情報サイトをお試しください。</div>
 {% else %}<p class="subtext">コードを入力すると、選択した銘柄の指標を取得します（最大20銘柄）。</p>{% endif %}
-{% if content and content.failures %}<details class="panel"><summary>取得できなかった銘柄と理由（{{ content.failures|length }}件）</summary><ul>{% for item in content.failures %}<li>{{ item.code }}: {{ item.reason }}</li>{% endfor %}</ul></details>{% endif %}
+{% if content and content.partial %}<div class="notice">一部の財務指標はデータ提供元の一時制限により未取得です。行自体は表示しており、ROEなどは「—」として再試行できます。</div>{% endif %}
 <p class="disclaimer">PER、PBR、ROEなどは取得時点の参考値です。最終的な投資判断には使用しないでください。</p>
 {% endblock %}

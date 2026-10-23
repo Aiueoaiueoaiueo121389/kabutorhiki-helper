@@ -6,7 +6,7 @@
     <form class="search" action="/" method="get">
       <input type="hidden" name="page" value="timing">
       <label for="code">銘柄コード</label>
-      <input id="code" name="code" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" value="{{ code }}" placeholder="例: 7203" required>
+      <input id="code" name="code" inputmode="text" pattern="[0-9]{4}|[0-9]{3}[A-Za-z]" maxlength="4" value="{{ code }}" placeholder="例: 7203 / 130A" required>
       <button type="submit">株価を検索</button>
     </form>
   </section>

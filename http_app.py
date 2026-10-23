@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from html import escape
+import re
 import secrets
 from threading import Lock
 from time import monotonic
@@ -24,6 +25,14 @@ _cache_lock = Lock()
 _fundamentals_cache: dict[str, tuple[float, dict]] = {}
 _sessions: dict[str, tuple[float, dict]] = {}
 _sessions_lock = Lock()
+
+JP_NAME_OVERRIDES = {
+    "130A": "VIS",
+    "3921": "ネオジャパン",
+    "7203": "トヨタ自動車",
+    "6758": "ソニーグループ",
+    "8306": "三菱UFJフィナンシャル・グループ",
+}
 
 
 def rsi(series: pd.Series, period: int = 14) -> pd.Series:
@@ -174,9 +183,9 @@ def make_chart(data: pd.DataFrame) -> str:
 
 
 def parse_code(code: str) -> str:
-    value = code.strip()
-    if not (value.isdigit() and len(value) == 4):
-        raise HTTPException(status_code=422, detail="銘柄コードは4桁の数字で入力してください。")
+    value = code.strip().upper()
+    if not re.fullmatch(r"(?:[0-9]{4}|[0-9]{3}[A-Z])", value):
+        raise HTTPException(status_code=422, detail="銘柄コードは4桁、または130Aのような英字付き形式で入力してください。")
     return value
 
 
@@ -191,6 +200,21 @@ def load_fundamentals(code: str) -> dict:
     result = {field: info.get(field) for field in fields}
     with _cache_lock:
         _fundamentals_cache[code] = (now, result.copy())
+    return result
+
+
+def safe_screening_fundamentals(code: str) -> dict:
+    """Return a row-shaped result even when Yahoo temporarily rate-limits fundamentals."""
+    result = {"longName": JP_NAME_OVERRIDES.get(code, ""), "shortName": "", "trailingPE": None,
+              "priceToBook": None, "returnOnEquity": None, "revenueGrowth": None,
+              "dividendYield": None, "debtToEquity": None, "data_status": "一部未取得"}
+    try:
+        result.update(load_fundamentals(code))
+        result["data_status"] = "取得済み"
+    except Exception:
+        # A rate-limit must never turn the whole screening page into an error.
+        pass
+    result["longName"] = JP_NAME_OVERRIDES.get(code) or result.get("longName") or result.get("shortName") or f"{code}.T"
     return result
 
 
@@ -308,9 +332,10 @@ def home(
                 data = load_data(item)
                 last = data.iloc[-1]
                 name = data.attrs.get("company_name") or data.attrs.get("stock_name") or "—"
-                rows.append({"code": item, "name": name, "price": float(last.Close), "date": data.index[-1].strftime("%Y-%m-%d"), "error": ""})
+                info = safe_screening_fundamentals(item)
+                rows.append({"code": item, "name": name, "price": float(last.Close), "date": data.index[-1].strftime("%Y-%m-%d"), "roe": numeric_or_none(info.get("returnOnEquity")), "pbr": numeric_or_none(info.get("priceToBook")), "dividend": numeric_or_none(info.get("dividendYield")), "error": ""})
             except Exception as exc:
-                rows.append({"code": item, "name": "—", "price": None, "date": "—", "error": str(exc)[:160]})
+                rows.append({"code": item, "name": "—", "price": None, "date": "—", "roe": None, "pbr": None, "dividend": None, "error": str(exc)[:160]})
         context["content"] = {"rows": rows}
         return page_response(request, "watchlist.html", context, session_id)
     if page == "memos":
@@ -407,15 +432,16 @@ async def add_watchlist(request: Request):
     code = str(form.get("code", "")).strip()
     next_path = safe_return_path(str(form.get("next", "")))
     message = ""
-    if code.isdigit() and len(code) == 4 and code not in session["watchlist"] and len(session["watchlist"]) < 20:
+    if re.fullmatch(r"(?:[0-9]{4}|[0-9]{3}[A-Za-z])", code) and code.upper() not in session["watchlist"] and len(session["watchlist"]) < 20:
+        code = code.upper()
         session["watchlist"].append(code)
         message = "ウォッチリストに追加しました。"
     elif code in session["watchlist"]:
         message = "この銘柄はすでにウォッチリストにあります。"
-    elif code.isdigit() and len(code) == 4:
+    elif re.fullmatch(r"(?:[0-9]{4}|[0-9]{3}[A-Za-z])", code):
         message = "ウォッチリストは20銘柄まで追加できます。"
     else:
-        message = "銘柄コードは4桁の数字で入力してください。"
+        message = "銘柄コードは4桁、または130Aのような英字付き形式で入力してください。"
     separator = "&" if "?" in next_path else "?"
     response = RedirectResponse(f"{next_path}{separator}message={quote(message)}", status_code=303)
     response.set_cookie("kabupick_session", session_id, max_age=30 * 24 * 60 * 60, httponly=True, secure=request.headers.get("x-forwarded-proto") == "https", samesite="lax")
@@ -451,25 +477,23 @@ def screening_context(raw_codes: str, sort: str) -> dict:
     valid = []
     for token in raw_codes.split(",")[:20]:
         token = token.strip()
-        if token.isdigit() and len(token) == 4:
-            valid.append(token)
+        if re.fullmatch(r"(?:[0-9]{4}|[0-9]{3}[A-Za-z])", token):
+            valid.append(token.upper())
     rows = []
     failures = []
     for code in dict.fromkeys(valid):
-        try:
-            info = load_fundamentals(code)
-            rows.append({
-                "code": code,
-                "name": info.get("longName") or "—",
-                "per": numeric_or_none(info.get("trailingPE")),
-                "pbr": numeric_or_none(info.get("priceToBook")),
-                "roe": numeric_or_none(info.get("returnOnEquity")),
-                "growth": numeric_or_none(info.get("revenueGrowth")),
-                "dividend": numeric_or_none(info.get("dividendYield")),
-                "debt": numeric_or_none(info.get("debtToEquity")),
-            })
-        except Exception as exc:
-            failures.append({"code": code, "reason": f"{type(exc).__name__}: {str(exc)[:160]}"})
+        info = safe_screening_fundamentals(code)
+        rows.append({
+            "code": code,
+            "name": info.get("longName") or "—",
+            "per": numeric_or_none(info.get("trailingPE")),
+            "pbr": numeric_or_none(info.get("priceToBook")),
+            "roe": numeric_or_none(info.get("returnOnEquity")),
+            "growth": numeric_or_none(info.get("revenueGrowth")),
+            "dividend": numeric_or_none(info.get("dividendYield")),
+            "debt": numeric_or_none(info.get("debtToEquity")),
+            "data_status": info.get("data_status", "一部未取得"),
+        })
     columns = {
         "growth": "growth",
         "value": "per",
@@ -480,4 +504,4 @@ def screening_context(raw_codes: str, sort: str) -> dict:
     descending = sort_key in ("growth", "dividend")
     available = sorted((row for row in rows if row[sort_key] is not None), key=lambda row: row[sort_key], reverse=descending)
     rows = available + [row for row in rows if row[sort_key] is None]
-    return {"rows": rows, "failures": failures, "sort": sort, "searched": True}
+    return {"rows": rows, "failures": failures, "sort": sort, "searched": True, "partial": any(row["data_status"] != "取得済み" for row in rows)}
