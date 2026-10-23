@@ -28,6 +28,9 @@ st.markdown(
     h1, h2, h3, p, label, [data-testid="stMarkdownContainer"] { color: var(--text-color); }
     [data-testid="stHeader"] { background: var(--background-color); }
     [data-testid="stSidebar"] { background: var(--secondary-background-color); border-right: 1px solid color-mix(in srgb, var(--text-color) 18%, transparent); transition: all .28s ease; }
+    /* Streamlit標準の収納ボタンを見失わないよう、ハンバーガー風に強調する。 */
+    [data-testid="stSidebar"] button[kind="header"], [data-testid="collapsedControl"] button { min-width:2.8rem; min-height:2.8rem; border:1px solid color-mix(in srgb, var(--text-color) 22%, transparent); background:var(--secondary-background-color); color:var(--text-color); border-radius:.65rem; box-shadow:0 4px 14px rgba(0,0,0,.14); }
+    [data-testid="stSidebar"] button[kind="header"] svg, [data-testid="collapsedControl"] svg { width:1.35rem; height:1.35rem; }
     [data-testid="stSidebar"] button, [data-testid="stSidebar"] input { min-height: 2.8rem; }
     .block-container { padding-top: 1.3rem; max-width: 1500px; }
     .stButton > button[kind="primary"] { background: linear-gradient(110deg,#2563eb,#06b6d4); border:0; color:white; font-weight:750; min-height:3rem; }
@@ -482,6 +485,7 @@ def plot_theme() -> tuple[str, str, str]:
 
 
 st.markdown("<div class='terminal-title'>MARKET TERMINAL / JAPAN EQUITIES</div>", unsafe_allow_html=True)
+st.markdown("<div class='terminal-card' style='display:flex;align-items:center;gap:.7rem;margin:.35rem 0 .8rem'><span style='font-size:1.5rem'>☰</span><strong>KABUPICK X メニュー</strong><span style='opacity:.72'>左上のボタンで収納・再表示</span></div>", unsafe_allow_html=True)
 st.title("株式タイミング・ターミナル")
 st.caption("テクニカル指標を一覧化した参考ツールです。自動売買は行いません。")
 
