@@ -5,8 +5,8 @@
     <div><p class="eyebrow">JAPAN EQUITIES</p><h1>株式タイミング検索</h1><p class="subtext">4桁の銘柄コードから、売買タイミングの参考情報を確認できます。</p></div>
     <form class="search" action="/" method="get">
       <input type="hidden" name="page" value="timing">
-      <label for="code">銘柄コード</label>
-      <input id="code" name="code" inputmode="text" pattern="[0-9]{4}|[0-9]{3}[A-Za-z]" maxlength="4" value="{{ code }}" placeholder="例: 7203 / 130A" required>
+      <label for="code">銘柄コード・会社名</label>
+      <input id="code" name="code" inputmode="text" value="{{ code }}" placeholder="例: トヨタ / ソニー / 7203 / 130A" required>
       <button type="submit">株価を検索</button>
     </form>
   </section>

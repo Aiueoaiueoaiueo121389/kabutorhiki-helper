@@ -32,7 +32,36 @@ JP_NAME_OVERRIDES = {
     "7203": "トヨタ自動車",
     "6758": "ソニーグループ",
     "8306": "三菱UFJフィナンシャル・グループ",
+    "9984": "ソフトバンクグループ",
+    "9432": "日本電信電話",
+    "9433": "KDDI",
+    "7267": "ホンダ",
+    "6098": "リクルートホールディングス",
+    "9983": "ファーストリテイリング",
 }
+SEARCH_ALIASES = {
+    "トヨタ": "7203", "トヨタ自動車": "7203", "toyota": "7203",
+    "ソニー": "6758", "ソニーグループ": "6758", "sony": "6758",
+    "ネオジャパン": "3921", "三菱ufj": "8306", "三菱ｕｆｊ": "8306",
+    "ソフトバンク": "9984", "ntt": "9432", "日本電信電話": "9432",
+    "kddi": "9433", "ホンダ": "7267", "本田技研": "7267",
+    "リクルート": "6098", "ユニクロ": "9983", "ファーストリテイリング": "9983",
+    "vis": "130A",
+}
+
+
+def resolve_search(value: str) -> str:
+    raw = value.strip()
+    upper = raw.upper()
+    if re.fullmatch(r"(?:[0-9]{4}|[0-9]{3}[A-Z])", upper):
+        return upper
+    key = raw.casefold()
+    if key in SEARCH_ALIASES:
+        return SEARCH_ALIASES[key]
+    for alias, code in SEARCH_ALIASES.items():
+        if key and (key in alias.casefold() or alias.casefold() in key):
+            return code
+    return raw
 
 
 def rsi(series: pd.Series, period: int = 14) -> pd.Series:
@@ -381,7 +410,7 @@ def home(
     if page == "timing" and not code.strip():
         return page_response(request, "home.html", context, session_id)
     try:
-        safe_code = parse_code(code)
+        safe_code = parse_code(resolve_search(code))
         if refresh:
             with _cache_lock:
                 _cache.pop(safe_code, None)
