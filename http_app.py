@@ -6,6 +6,8 @@ import secrets
 from threading import Lock
 from time import monotonic
 from urllib.parse import quote
+import os
+import requests
 
 import numpy as np
 import pandas as pd
@@ -23,6 +25,7 @@ templates = Jinja2Templates(directory="templates")
 _cache: dict[str, tuple[float, pd.DataFrame]] = {}
 _cache_lock = Lock()
 _fundamentals_cache: dict[str, tuple[float, dict]] = {}
+_listed_cache: tuple[float, list[dict]] | None = None
 _sessions: dict[str, tuple[float, dict]] = {}
 _sessions_lock = Lock()
 
@@ -61,6 +64,30 @@ def resolve_search(value: str) -> str:
     for alias, code in SEARCH_ALIASES.items():
         if key and (key in alias.casefold() or alias.casefold() in key):
             return code
+    # J-Quantsの上場銘柄マスタが設定されていれば、全銘柄の日本語会社名を検索する。
+    token = os.getenv("JQUANTS_API_TOKEN", "").strip()
+    if token and key:
+        global _listed_cache
+        now = monotonic()
+        try:
+            if _listed_cache is None or now - _listed_cache[0] > 900:
+                response = requests.get(
+                    "https://api.jquants.com/v1/listed/info",
+                    headers={"Authorization": f"Bearer {token}"},
+                    timeout=12,
+                )
+                response.raise_for_status()
+                _listed_cache = (now, response.json().get("info", []))
+            for row in _listed_cache[1]:
+                name = str(row.get("CompanyName") or row.get("CompanyNameEnglish") or "")
+                code = str(row.get("Code") or "").upper()
+                if re.fullmatch(r"[0-9]{5}", code) and code.endswith("0"):
+                    code = code[:4]
+                if code and key in name.casefold():
+                    return code
+        except Exception:
+            # 検索不能時も主要銘柄の内蔵辞書で検索を継続する。
+            pass
     return raw
 
 
