@@ -419,7 +419,9 @@ def diagnose(data: pd.DataFrame, fundamentals: dict | None = None) -> tuple[int,
     reasons.append(f"出来高：20日平均比 {latest.VolumeRatio:.2f}倍。" if pd.notna(latest.get("VolumeRatio")) else "出来高データがないため、出来高確認は判定に加点していません。")
     buy_ready = trend_up and macd_up and rsi_ok
     sell_ready = trend_down and macd_down
-    if buy_ready and score >= 90 and volume_confirmed:
+    high_quality = isinstance((fundamentals or {}).get("returnOnEquity"), (int, float)) and (fundamentals or {}).get("returnOnEquity") >= 0.15
+    reasonably_valued = isinstance((fundamentals or {}).get("priceToBook"), (int, float)) and (fundamentals or {}).get("priceToBook") <= 3
+    if buy_ready and score >= 90 and volume_confirmed and high_quality and reasonably_valued:
         return score, "テクニカル条件が強く成立", "ss", reasons
     if buy_ready and score >= 75:
         return score, "上昇条件が複数成立", "buy", reasons
