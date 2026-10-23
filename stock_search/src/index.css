@@ -1,0 +1,80 @@
+@import "tailwindcss";
+
+@plugin "daisyui" {
+  themes: light --default;
+}
+
+/* New design: CSS variables (used with border-[var(--border)] etc.) */
+:root {
+  --primary: #4f46e5;
+  --primary-hover: #4338ca;
+  --surface-50: #f8fafc;
+  --surface-100: #f1f5f9;
+  --border: #e2e8f0;
+}
+
+body {
+  font-family:
+    ui-sans-serif, system-ui, "Hiragino Sans", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+  @apply text-slate-900 bg-white antialiased;
+}
+
+/* Custom scrollbar (new design) */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 10px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* details/summary for sidebar filters */
+details > summary {
+  list-style: none;
+}
+
+details > summary::-webkit-details-marker {
+  display: none;
+}
+
+@keyframes mobileSheetUp {
+  from {
+    transform: translateY(100%);
+  }
+
+  to {
+    transform: translateY(0);
+  }
+}
+
+.mobile-sheet-enter {
+  animation: mobileSheetUp 0.2s ease-out;
+}
+
+/* iOS Safariの入力フォーカス時ズームを防止 */
+@media (max-width: 767px) {
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
